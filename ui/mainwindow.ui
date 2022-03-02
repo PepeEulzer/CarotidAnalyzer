@@ -17,13 +17,32 @@
    <string>Carotid Analyzer</string>
   </property>
   <property name="windowIcon">
-   <iconset resource="../../../../../../Git/test/ui/resources.qrc">
+   <iconset resource="resources.qrc">
     <normaloff>:/icons/resources/centerline.svg</normaloff>:/icons/resources/centerline.svg</iconset>
   </property>
   <property name="toolButtonStyle">
    <enum>Qt::ToolButtonTextUnderIcon</enum>
   </property>
-  <widget class="QWidget" name="centralwidget"/>
+  <widget class="QWidget" name="empty_central_widget">
+   <property name="sizePolicy">
+    <sizepolicy hsizetype="Preferred" vsizetype="Preferred">
+     <horstretch>0</horstretch>
+     <verstretch>0</verstretch>
+    </sizepolicy>
+   </property>
+   <layout class="QHBoxLayout" name="horizontalLayout_2">
+    <item>
+     <widget class="QLabel" name="label">
+      <property name="text">
+       <string>Select a module.</string>
+      </property>
+      <property name="alignment">
+       <set>Qt::AlignCenter</set>
+      </property>
+     </widget>
+    </item>
+   </layout>
+  </widget>
   <widget class="QMenuBar" name="menubar">
    <property name="geometry">
     <rect>
@@ -90,7 +109,7 @@
   </widget>
   <widget class="QToolBar" name="toolbar_save">
    <property name="windowTitle">
-    <string>toolBar_2</string>
+    <string>toolbar_save</string>
    </property>
    <property name="layoutDirection">
     <enum>Qt::RightToLeft</enum>
@@ -111,6 +130,18 @@
    <addaction name="action_discard_changes"/>
   </widget>
   <widget class="QDockWidget" name="dock_data_inspector">
+   <property name="maximumSize">
+    <size>
+     <width>400</width>
+     <height>524287</height>
+    </size>
+   </property>
+   <property name="baseSize">
+    <size>
+     <width>300</width>
+     <height>0</height>
+    </size>
+   </property>
    <property name="features">
     <set>QDockWidget::DockWidgetFloatable|QDockWidget::DockWidgetMovable</set>
    </property>
@@ -126,16 +157,16 @@
    <widget class="QWidget" name="data_inspector_contents">
     <layout class="QVBoxLayout" name="verticalLayout">
      <property name="leftMargin">
-      <number>0</number>
+      <number>1</number>
      </property>
      <property name="topMargin">
-      <number>0</number>
+      <number>1</number>
      </property>
      <property name="rightMargin">
-      <number>0</number>
+      <number>1</number>
      </property>
      <property name="bottomMargin">
-      <number>0</number>
+      <number>1</number>
      </property>
      <item>
       <widget class="QTableWidget" name="tableWidget">
@@ -144,6 +175,24 @@
        </property>
        <property name="alternatingRowColors">
         <bool>true</bool>
+       </property>
+       <property name="selectionMode">
+        <enum>QAbstractItemView::SingleSelection</enum>
+       </property>
+       <property name="selectionBehavior">
+        <enum>QAbstractItemView::SelectRows</enum>
+       </property>
+       <property name="iconSize">
+        <size>
+         <width>20</width>
+         <height>20</height>
+        </size>
+       </property>
+       <property name="showGrid">
+        <bool>false</bool>
+       </property>
+       <property name="rowCount">
+        <number>10</number>
        </property>
        <property name="columnCount">
         <number>3</number>
@@ -157,9 +206,31 @@
        <attribute name="horizontalHeaderDefaultSectionSize">
         <number>100</number>
        </attribute>
+       <attribute name="horizontalHeaderMinimumSectionSize">
+        <number>50</number>
+       </attribute>
+       <attribute name="horizontalHeaderStretchLastSection">
+        <bool>true</bool>
+       </attribute>
        <attribute name="verticalHeaderVisible">
         <bool>false</bool>
        </attribute>
+       <attribute name="verticalHeaderDefaultSectionSize">
+        <number>25</number>
+       </attribute>
+       <attribute name="verticalHeaderMinimumSectionSize">
+        <number>25</number>
+       </attribute>
+       <row/>
+       <row/>
+       <row/>
+       <row/>
+       <row/>
+       <row/>
+       <row/>
+       <row/>
+       <row/>
+       <row/>
        <column>
         <property name="text">
          <string>Patient ID</string>
@@ -189,7 +260,7 @@
   </widget>
   <action name="action_load_new_DICOM">
    <property name="icon">
-    <iconset resource="../../../../../../Git/test/ui/resources.qrc">
+    <iconset resource="resources.qrc">
      <normaloff>:/icons/resources/database-plus.svg</normaloff>:/icons/resources/database-plus.svg</iconset>
    </property>
    <property name="text">
@@ -201,7 +272,7 @@
   </action>
   <action name="action_set_working_directory">
    <property name="icon">
-    <iconset resource="../../../../../../Git/test/ui/resources.qrc">
+    <iconset resource="resources.qrc">
      <normaloff>:/icons/resources/folder-account.svg</normaloff>:/icons/resources/folder-account.svg</iconset>
    </property>
    <property name="text">
@@ -216,7 +287,7 @@
     <bool>false</bool>
    </property>
    <property name="icon">
-    <iconset resource="../../../../../../Git/test/ui/resources.qrc">
+    <iconset resource="resources.qrc">
      <normaloff>:/icons/resources/progress-check.svg</normaloff>:/icons/resources/progress-check.svg</iconset>
    </property>
    <property name="text">
@@ -231,7 +302,7 @@
     <bool>true</bool>
    </property>
    <property name="icon">
-    <iconset resource="../../../../../../Git/test/ui/resources.qrc">
+    <iconset resource="resources.qrc">
      <normaloff>:/icons/resources/crop.svg</normaloff>:/icons/resources/crop.svg</iconset>
    </property>
    <property name="text">
@@ -243,7 +314,7 @@
     <bool>true</bool>
    </property>
    <property name="icon">
-    <iconset resource="../../../../../../Git/test/ui/resources.qrc">
+    <iconset resource="resources.qrc">
      <normaloff>:/icons/resources/drawing-box.svg</normaloff>:/icons/resources/drawing-box.svg</iconset>
    </property>
    <property name="text">
@@ -255,7 +326,7 @@
     <bool>true</bool>
    </property>
    <property name="icon">
-    <iconset resource="../../../../../../Git/test/ui/resources.qrc">
+    <iconset resource="resources.qrc">
      <normaloff>:/icons/resources/vector-polyline-edit.svg</normaloff>:/icons/resources/vector-polyline-edit.svg</iconset>
    </property>
    <property name="text">
@@ -275,7 +346,7 @@
     <bool>true</bool>
    </property>
    <property name="icon">
-    <iconset resource="../../../../../../Git/test/ui/resources.qrc">
+    <iconset resource="resources.qrc">
      <normaloff>:/icons/resources/chart-bell-curve-cumulative.svg</normaloff>:/icons/resources/chart-bell-curve-cumulative.svg</iconset>
    </property>
    <property name="text">
@@ -290,7 +361,7 @@
     <bool>true</bool>
    </property>
    <property name="icon">
-    <iconset resource="../../../../../../Git/test/ui/resources.qrc">
+    <iconset resource="resources.qrc">
      <normaloff>:/icons/resources/database-eye.svg</normaloff>:/icons/resources/database-eye.svg</iconset>
    </property>
    <property name="text">
@@ -302,7 +373,7 @@
     <bool>false</bool>
    </property>
    <property name="icon">
-    <iconset resource="../../../../../../Git/test/ui/resources.qrc">
+    <iconset resource="resources.qrc">
      <normaloff>:/icons/resources/delete-forever.svg</normaloff>:/icons/resources/delete-forever.svg</iconset>
    </property>
    <property name="text">
@@ -311,7 +382,7 @@
   </action>
  </widget>
  <resources>
-  <include location="../../../../../../Git/test/ui/resources.qrc"/>
+  <include location="resources.qrc"/>
  </resources>
  <connections/>
 </ui>
