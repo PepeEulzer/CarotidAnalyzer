@@ -1,0 +1,15 @@
+<RCC>
+  <qresource prefix="icons">
+    <file>resources/centerline.svg</file>
+    <file>resources/chart-bell-curve-cumulative.svg</file>
+    <file>resources/crop.svg</file>
+    <file>resources/database-eye.svg</file>
+    <file>resources/database-plus.svg</file>
+    <file>resources/delete-forever.svg</file>
+    <file>resources/drawing-box.svg</file>
+    <file>resources/folder.svg</file>
+    <file>resources/folder-account.svg</file>
+    <file>resources/progress-check.svg</file>
+    <file>resources/vector-polyline-edit.svg</file>
+  </qresource>
+</RCC>

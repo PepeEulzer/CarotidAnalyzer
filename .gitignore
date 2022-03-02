@@ -1,0 +1,16 @@
+# python cache directory
+__pychache__
+
+# python pre-compiled cache files
+*.pyc
+
+# mac ds_store
+.DS_Store
+
+# vs code settings
+.vscode
+settings.json
+
+# build files
+build
+dist
