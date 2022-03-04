@@ -33,6 +33,12 @@
    <layout class="QHBoxLayout" name="horizontalLayout_2">
     <item>
      <widget class="QLabel" name="label">
+      <property name="sizePolicy">
+       <sizepolicy hsizetype="Expanding" vsizetype="Preferred">
+        <horstretch>0</horstretch>
+        <verstretch>0</verstretch>
+       </sizepolicy>
+      </property>
       <property name="text">
        <string>Select a module.</string>
       </property>
@@ -130,9 +136,15 @@
    <addaction name="action_discard_changes"/>
   </widget>
   <widget class="QDockWidget" name="dock_data_inspector">
+   <property name="sizePolicy">
+    <sizepolicy hsizetype="Preferred" vsizetype="Preferred">
+     <horstretch>0</horstretch>
+     <verstretch>0</verstretch>
+    </sizepolicy>
+   </property>
    <property name="maximumSize">
     <size>
-     <width>400</width>
+     <width>524287</width>
      <height>524287</height>
     </size>
    </property>
@@ -169,68 +181,46 @@
       <number>1</number>
      </property>
      <item>
-      <widget class="QTableWidget" name="tableWidget">
-       <property name="sizeAdjustPolicy">
-        <enum>QAbstractScrollArea::AdjustToContents</enum>
+      <widget class="QTreeWidget" name="tree_widget_data">
+       <property name="sizePolicy">
+        <sizepolicy hsizetype="Minimum" vsizetype="Expanding">
+         <horstretch>0</horstretch>
+         <verstretch>0</verstretch>
+        </sizepolicy>
        </property>
-       <property name="alternatingRowColors">
-        <bool>true</bool>
-       </property>
-       <property name="selectionMode">
-        <enum>QAbstractItemView::SingleSelection</enum>
-       </property>
-       <property name="selectionBehavior">
-        <enum>QAbstractItemView::SelectRows</enum>
-       </property>
-       <property name="iconSize">
+       <property name="minimumSize">
         <size>
-         <width>20</width>
-         <height>20</height>
+         <width>520</width>
+         <height>0</height>
         </size>
        </property>
-       <property name="showGrid">
-        <bool>false</bool>
+       <property name="maximumSize">
+        <size>
+         <width>16777215</width>
+         <height>16777215</height>
+        </size>
        </property>
-       <property name="rowCount">
-        <number>10</number>
+       <property name="editTriggers">
+        <set>QAbstractItemView::NoEditTriggers</set>
+       </property>
+       <property name="indentation">
+        <number>20</number>
+       </property>
+       <property name="uniformRowHeights">
+        <bool>true</bool>
+       </property>
+       <property name="allColumnsShowFocus">
+        <bool>true</bool>
        </property>
        <property name="columnCount">
-        <number>3</number>
+        <number>4</number>
        </property>
-       <attribute name="horizontalHeaderVisible">
+       <attribute name="headerDefaultSectionSize">
+        <number>120</number>
+       </attribute>
+       <attribute name="headerHighlightSections">
         <bool>true</bool>
        </attribute>
-       <attribute name="horizontalHeaderCascadingSectionResizes">
-        <bool>false</bool>
-       </attribute>
-       <attribute name="horizontalHeaderDefaultSectionSize">
-        <number>100</number>
-       </attribute>
-       <attribute name="horizontalHeaderMinimumSectionSize">
-        <number>50</number>
-       </attribute>
-       <attribute name="horizontalHeaderStretchLastSection">
-        <bool>true</bool>
-       </attribute>
-       <attribute name="verticalHeaderVisible">
-        <bool>false</bool>
-       </attribute>
-       <attribute name="verticalHeaderDefaultSectionSize">
-        <number>25</number>
-       </attribute>
-       <attribute name="verticalHeaderMinimumSectionSize">
-        <number>25</number>
-       </attribute>
-       <row/>
-       <row/>
-       <row/>
-       <row/>
-       <row/>
-       <row/>
-       <row/>
-       <row/>
-       <row/>
-       <row/>
        <column>
         <property name="text">
          <string>Patient ID</string>
@@ -238,12 +228,20 @@
        </column>
        <column>
         <property name="text">
-         <string>Left</string>
+         <string>Cropped</string>
+        </property>
+        <property name="textAlignment">
+         <set>AlignLeading|AlignVCenter</set>
         </property>
        </column>
        <column>
         <property name="text">
-         <string>Right</string>
+         <string>Segmented</string>
+        </property>
+       </column>
+       <column>
+        <property name="text">
+         <string>Centerlines</string>
         </property>
        </column>
       </widget>
@@ -251,7 +249,7 @@
      <item>
       <widget class="QPushButton" name="pushButton">
        <property name="text">
-        <string>Load Selected Patient</string>
+        <string>Load Selected File</string>
        </property>
       </widget>
      </item>

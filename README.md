@@ -36,8 +36,8 @@ Modify UI `.ui` and Qt resource `.qrc` files. On Windows, compile them with
 
 ```
 cd C:\Users\<username>\.conda\envs\CarotidAnalyzer\Scripts
-pyuic5.exe C:\Git\test\ui\mainwindow.ui -o C:\Git\test\mainwindow_ui.py
-pyrcc5.exe C:\Git\test\ui\resources.qrc -o C:\Git\test\resources_rc.py
+pyuic5.exe C:\Git\carotidanalyzer\ui\mainwindow.ui -o C:\Git\carotidanalyzer\mainwindow_ui.py
+pyrcc5.exe C:\Git\carotidanalyzer\ui\resources.qrc -o C:\Git\carotidanalyzer\resources_rc.py
 ```
 
 Adapt to your Git path. On other platforms, just use the `pyuic5`/`pyrcc5` commands (no .exe) with the CarotidAnalyzer environment active.

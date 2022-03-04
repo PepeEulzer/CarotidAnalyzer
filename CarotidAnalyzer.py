@@ -3,7 +3,7 @@ import sys
 import glob
 
 from PyQt5.QtWidgets import (
-    QApplication, QFileDialog, QMainWindow, QMessageBox, QTableWidgetItem
+    QApplication, QFileDialog, QMainWindow, QMessageBox, QTreeWidgetItem
 )
 
 from mainwindow_ui import Ui_MainWindow
@@ -49,12 +49,39 @@ class CarotidAnalyzer(QMainWindow, Ui_MainWindow):
             return
         self.working_dir = dir
         self.patient_folder_paths = glob.glob(os.path.join(dir, "patient*"))
-        self.tableWidget.clearContents()
-        self.tableWidget.setRowCount(len(self.patient_folder_paths))
+        self.tree_widget_data.clear()
         for i in range(len(self.patient_folder_paths)):
-            patient_ID = os.path.basename(self.patient_folder_paths[i])
-            self.tableWidget.setItem(i, 0, QTableWidgetItem(patient_ID))
-        self.tableWidget.resizeColumnsToContents()
+
+            # internal representation of which files exists? which paths? associate with table over patientID?
+
+            patient_base_path = self.patient_folder_paths[i]
+            patient_ID = os.path.basename(patient_base_path)
+            
+            left = ["Left", "", "", ""]
+            if os.path.exists(os.path.join(patient_base_path, patient_ID + "_left.nrrd")):
+                left[1] = "\u2713"
+            if os.path.exists(os.path.join(patient_base_path, patient_ID + "_left.seg.nrrd")):
+                left[2] = "\u2713"
+            if os.path.exists(os.path.join(patient_base_path, "models", patient_ID + "_left_lumen_centerlines.vtp")):
+                left[3] = "\u2713"
+
+            right = ["Right", "", "", ""]
+            if os.path.exists(os.path.join(patient_base_path, patient_ID + "_right.nrrd")):
+                right[1] = "\u2713"
+            if os.path.exists(os.path.join(patient_base_path, patient_ID + "_right.seg.nrrd")):
+                right[2] = "\u2713"
+            if os.path.exists(os.path.join(patient_base_path, "models", patient_ID + "_right_lumen_centerlines.vtp")):
+                right[3] = "\u2713"
+
+            entry_left = QTreeWidgetItem(left)
+            entry_right = QTreeWidgetItem(right)
+            entry_patient = QTreeWidgetItem([patient_ID, "", "", ""])
+            entry_patient.addChild(entry_left)
+            entry_patient.addChild(entry_right)
+            
+            self.tree_widget_data.addTopLevelItem(entry_patient)
+            entry_patient.setExpanded(True)
+        self.tree_widget_data.resizeColumnToContents(0)
             
             
 
