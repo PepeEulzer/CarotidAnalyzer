@@ -190,7 +190,7 @@
        </property>
        <property name="minimumSize">
         <size>
-         <width>520</width>
+         <width>400</width>
          <height>0</height>
         </size>
        </property>
@@ -213,10 +213,10 @@
         <bool>true</bool>
        </property>
        <property name="columnCount">
-        <number>4</number>
+        <number>3</number>
        </property>
        <attribute name="headerDefaultSectionSize">
-        <number>120</number>
+        <number>90</number>
        </attribute>
        <attribute name="headerHighlightSections">
         <bool>true</bool>
@@ -228,28 +228,20 @@
        </column>
        <column>
         <property name="text">
-         <string>Cropped</string>
-        </property>
-        <property name="textAlignment">
-         <set>AlignLeading|AlignVCenter</set>
+         <string>Left</string>
         </property>
        </column>
        <column>
         <property name="text">
-         <string>Segmented</string>
-        </property>
-       </column>
-       <column>
-        <property name="text">
-         <string>Centerlines</string>
+         <string>Right</string>
         </property>
        </column>
       </widget>
      </item>
      <item>
-      <widget class="QPushButton" name="pushButton">
+      <widget class="QPushButton" name="button_load_file">
        <property name="text">
-        <string>Load Selected File</string>
+        <string>Load Selected Patient</string>
        </property>
       </widget>
      </item>
