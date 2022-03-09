@@ -1,8 +1,6 @@
-from email.mime import base
 import os
 import sys
 import glob
-from xml.etree.ElementTree import PI
 
 from PyQt5.QtCore import QSettings, QVariant
 from PyQt5.QtWidgets import (
@@ -11,6 +9,7 @@ from PyQt5.QtWidgets import (
 from PyQt5.QtGui import QColor
 
 from mainwindow_ui import Ui_MainWindow
+from modules.CropModule import CropModule
 
 class CarotidAnalyzer(QMainWindow, Ui_MainWindow):
     def __init__(self, parent=None):
@@ -22,6 +21,9 @@ class CarotidAnalyzer(QMainWindow, Ui_MainWindow):
         self.compute_threads_active = 0
         self.working_dir = ""
         self.patient_data = []
+
+        # instantiate modules
+        self.crop_module = CropModule(self)
 
         # only one module can be active
         self.active_module = None
@@ -43,6 +45,7 @@ class CarotidAnalyzer(QMainWindow, Ui_MainWindow):
         self.action_discard_changes.triggered.connect(self.discard_changes)
         self.action_save_and_propagate.triggered.connect(self.save_and_propagate)
         self.action_quit.triggered.connect(self.close)
+        self.button_load_file.clicked.connect(self.load_selected_patient)
 
         # restore state properties
         settings = QSettings()
@@ -146,6 +149,17 @@ class CarotidAnalyzer(QMainWindow, Ui_MainWindow):
         dir = QFileDialog.getExistingDirectory(self, "Set Working Directory")
         if len(dir) > 0:
             self.set_working_dir(dir)
+
+    def load_selected_patient(self):
+        selected = self.tree_widget_data.currentItem()
+        while selected.parent() != None:
+            selected = selected.parent()
+        patient_ID = selected.text(0)
+        for patient in self.patient_data:
+            if (patient['patient_ID'] == patient_ID):
+                # update patient in all modules
+                self.crop_module.load_patient(patient)
+                break
 
     
     def view_data_inspector(self, on:bool):
