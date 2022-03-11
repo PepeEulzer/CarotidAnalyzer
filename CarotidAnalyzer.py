@@ -35,17 +35,17 @@ class CarotidAnalyzer(QMainWindow, Ui_MainWindow):
         ]
         
         # connect signals to slots
-        self.action_load_new_DICOM.triggered.connect(self.load_new_DICOM)
-        self.action_set_working_directory.triggered.connect(self.open_working_dir_dialog)
-        self.action_data_inspector.triggered[bool].connect(self.view_data_inspector)
-        self.action_crop_module.triggered[bool].connect(self.view_crop_module)
-        self.action_segmentation_module.triggered[bool].connect(self.view_segmentation_module)
-        self.action_centerline_module.triggered[bool].connect(self.view_centerline_module)
-        self.action_stenosis_classifier.triggered[bool].connect(self.view_stenosis_classifier)
-        self.action_discard_changes.triggered.connect(self.discard_changes)
-        self.action_save_and_propagate.triggered.connect(self.save_and_propagate)
+        self.action_load_new_DICOM.triggered.connect(self.loadNewDICOM)
+        self.action_set_working_directory.triggered.connect(self.openWorkingDirDialog)
+        self.action_data_inspector.triggered[bool].connect(self.viewDataInspector)
+        self.action_crop_module.triggered[bool].connect(self.viewCropModule)
+        self.action_segmentation_module.triggered[bool].connect(self.viewSegmentationModule)
+        self.action_centerline_module.triggered[bool].connect(self.viewCenterlineModule)
+        self.action_stenosis_classifier.triggered[bool].connect(self.viewStenosisClassifier)
+        self.action_discard_changes.triggered.connect(self.discardChanges)
+        self.action_save_and_propagate.triggered.connect(self.saveAndPropagate)
         self.action_quit.triggered.connect(self.close)
-        self.button_load_file.clicked.connect(self.load_selected_patient)
+        self.button_load_file.clicked.connect(self.loadSelectedPatient)
 
         # restore state properties
         settings = QSettings()
@@ -55,14 +55,14 @@ class CarotidAnalyzer(QMainWindow, Ui_MainWindow):
             
         dir = settings.value("LastWorkingDir")
         if dir != None:
-            self.set_working_dir(dir)
+            self.setWorkingDir(dir)
 
 
-    def load_new_DICOM(self):
+    def loadNewDICOM(self):
         print("Call file dialog. Load a DICOM dataset")
 
     
-    def set_working_dir(self, dir):
+    def setWorkingDir(self, dir):
         if len(dir) <= 0:
             return
         self.working_dir = dir
@@ -145,12 +145,12 @@ class CarotidAnalyzer(QMainWindow, Ui_MainWindow):
         self.tree_widget_data.resizeColumnToContents(2)
         
     
-    def open_working_dir_dialog(self):
+    def openWorkingDirDialog(self):
         dir = QFileDialog.getExistingDirectory(self, "Set Working Directory")
         if len(dir) > 0:
-            self.set_working_dir(dir)
+            self.setWorkingDir(dir)
 
-    def load_selected_patient(self):
+    def loadSelectedPatient(self):
         selected = self.tree_widget_data.currentItem()
         while selected.parent() != None:
             selected = selected.parent()
@@ -162,14 +162,14 @@ class CarotidAnalyzer(QMainWindow, Ui_MainWindow):
                 break
 
     
-    def view_data_inspector(self, on:bool):
+    def viewDataInspector(self, on:bool):
         if on:
             self.dock_data_inspector.show()
         else:
             self.dock_data_inspector.close()
 
     
-    def activate_module(self, module):
+    def activateModule(self, module):
         for m in self.processing_modules + self.vis_modules:
             if m == module:
                 print("Activating module", m.objectName())
@@ -178,45 +178,45 @@ class CarotidAnalyzer(QMainWindow, Ui_MainWindow):
                 m.setChecked(False)
 
     
-    def view_crop_module(self, on:bool):
+    def viewCropModule(self, on:bool):
         if on:
-            self.activate_module(self.action_crop_module)
+            self.activateModule(self.action_crop_module)
         else:
             print("Deactivating module", self.action_crop_module.objectName())
             self.active_module = None
     
     
-    def view_segmentation_module(self, on:bool):
+    def viewSegmentationModule(self, on:bool):
         if on:
-            self.activate_module(self.action_segmentation_module)
+            self.activateModule(self.action_segmentation_module)
         else:
             print("Deactivating module", self.action_segmentation_module.objectName())
             self.active_module = None
 
     
-    def view_centerline_module(self, on:bool):
+    def viewCenterlineModule(self, on:bool):
         if on:
-            self.activate_module(self.action_centerline_module)
+            self.activateModule(self.action_centerline_module)
         else:
             print("Deactivating module", self.action_centerline_module.objectName())
             self.active_module = None
 
     
-    def view_stenosis_classifier(self, on:bool):
+    def viewStenosisClassifier(self, on:bool):
         if on:
-            self.activate_module(self.action_stenosis_classifier)
+            self.activateModule(self.action_stenosis_classifier)
         else:
             print("Deactivating module", self.action_stenosis_classifier.objectName())
             self.active_module = None
 
     
-    def discard_changes(self):
+    def discardChanges(self):
         print("Call discard function of active module.")
         self.action_discard_changes.setEnabled(False)
         self.action_save_and_propagate.setEnabled(False)
 
     
-    def save_and_propagate(self):
+    def saveAndPropagate(self):
         print("Call save function of active module. Update following steps.")
         self.action_discard_changes.setEnabled(False)
         self.action_save_and_propagate.setEnabled(False)
