@@ -4,12 +4,18 @@
 
 ### Setup
 
-Using anaconda
+Dependencies
+- Python 3.6 (requirement for vmtk)
+- numpy 1.12
+- pyqt 5.9
+- itk 4.13
+- vtk 8.1
+- vmtk 1.4
+
+Install using Anaconda
 
 ```
-conda create -n CarotidAnalyzer -c conda-forge pyqtgraph=0.12 pyqt
-conda activate CarotidAnalyzer
-conda install -c vmtk vtk itk vmtk
+conda create -n CarotidAnalyzer -c vmtk python=3.6 pyqt numpy itk vtk vmtk
 ```
 
 
