@@ -10,7 +10,7 @@ class VTKImageSliceInteractor(QVTKRenderWindowInteractor):
     """
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setInteractorStyle(vtk.vtkInteractorStyleImage())
+        #self.setInteractorStyle(vtk.vtkInteractorStyleImage())
         self.image = vtk.vtkImageData()
         
         # lut for normal CTA display (gray map)
@@ -42,7 +42,10 @@ class VTKImageSliceInteractor(QVTKRenderWindowInteractor):
         reader = vmtkscripts.vmtkImageReader()
         reader.InputFileName = path
         reader.Execute()
-        print(reader.Image)
+        self.image = reader.Image
+        self.image_mapper.SetInputData(self.image)
+        self.renderer.ResetCamera()
+        self.GetRenderWindow().Render()
 
 
 
@@ -53,9 +56,13 @@ class CropModule(QWidget):
         self.slice_view = VTKImageSliceInteractor(self)
 
 
-        self.slice_view_layout = QVBoxLayout()
-        self.slice_view_layout.addWidget()
+        self.slice_view_layout = QVBoxLayout(self)
+        self.slice_view_layout.setContentsMargins(0,0,0,0)
+        self.slice_view_layout.addWidget(self.slice_view)
+
+        self.slice_view.Initialize()
+        self.slice_view.Start()
     
     def load_patient(self, patient_dict):
         print("Crop module loading " + patient_dict['patient_ID'])
-        #self.
+        self.slice_view.loadNrrd(patient_dict['volume_left'])

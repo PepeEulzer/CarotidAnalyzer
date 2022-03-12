@@ -4,7 +4,8 @@ import glob
 
 from PyQt5.QtCore import QSettings, QVariant
 from PyQt5.QtWidgets import (
-    QApplication, QFileDialog, QMainWindow, QMessageBox, QTreeWidgetItem
+    QApplication, QFileDialog, QMainWindow, QMessageBox, 
+    QTreeWidgetItem
 )
 from PyQt5.QtGui import QColor
 
@@ -24,9 +25,9 @@ class CarotidAnalyzer(QMainWindow, Ui_MainWindow):
 
         # instantiate modules
         self.crop_module = CropModule(self)
+        self.module_stack.addWidget(self.crop_module)
 
         # only one module can be active
-        self.active_module = None
         self.processing_modules = [
             self.action_crop_module, self.action_segmentation_module, self.action_centerline_module
         ]
@@ -169,45 +170,39 @@ class CarotidAnalyzer(QMainWindow, Ui_MainWindow):
             self.dock_data_inspector.close()
 
     
-    def activateModule(self, module):
+    def uncheckInactiveModules(self, active_module):
         for m in self.processing_modules + self.vis_modules:
-            if m == module:
-                print("Activating module", m.objectName())
-                self.active_module = m
-            else:
+            if not m == active_module:
                 m.setChecked(False)
 
     
     def viewCropModule(self, on:bool):
         if on:
-            self.activateModule(self.action_crop_module)
+            self.uncheckInactiveModules(self.action_crop_module)
+            self.module_stack.setCurrentWidget(self.crop_module)
         else:
-            print("Deactivating module", self.action_crop_module.objectName())
-            self.active_module = None
-    
+            self.module_stack.setCurrentWidget(self.empty_module)
+
     
     def viewSegmentationModule(self, on:bool):
         if on:
-            self.activateModule(self.action_segmentation_module)
+            self.uncheckInactiveModules(self.action_segmentation_module)
         else:
-            print("Deactivating module", self.action_segmentation_module.objectName())
-            self.active_module = None
+            self.module_stack.setCurrentWidget(self.empty_module)
 
     
     def viewCenterlineModule(self, on:bool):
         if on:
-            self.activateModule(self.action_centerline_module)
+            self.uncheckInactiveModules(self.action_centerline_module)
         else:
-            print("Deactivating module", self.action_centerline_module.objectName())
-            self.active_module = None
+            self.module_stack.setCurrentWidget(self.empty_module)
 
     
     def viewStenosisClassifier(self, on:bool):
         if on:
-            self.activateModule(self.action_stenosis_classifier)
+            self.uncheckInactiveModules(self.action_stenosis_classifier)
         else:
-            print("Deactivating module", self.action_stenosis_classifier.objectName())
-            self.active_module = None
+            self.module_stack.setCurrentWidget(self.empty_module)
 
     
     def discardChanges(self):
