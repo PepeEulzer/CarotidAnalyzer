@@ -8,9 +8,15 @@ class VTKImageSliceInteractor(QVTKRenderWindowInteractor):
     Displays an image view of a volume slice.
     Interactions: Pan, zoom, scroll.
     """
+    
+    
+    # TODO use a vtkImageViewer2 instead?
+    # https://kitware.github.io/vtk-examples/site/Cxx/IO/ReadDICOMSeries/
+
+
     def __init__(self, parent=None):
         super().__init__(parent)
-        #self.setInteractorStyle(vtk.vtkInteractorStyleImage())
+        self.SetInteractorStyle(vtk.vtkInteractorStyleImage())
         self.image = vtk.vtkImageData()
         
         # lut for normal CTA display (gray map)
@@ -62,7 +68,22 @@ class CropModule(QWidget):
 
         self.slice_view.Initialize()
         self.slice_view.Start()
+
+
+    def showEvent(self, event):
+        print("show event on crop module")
+        self.slice_view.Enable()
+        self.slice_view.EnableRenderOn()
+        super(CropModule, self).showEvent(event)
+
+
+    def hideEvent(self, event):
+        print("hide event on crop module")
+        self.slice_view.Disable()
+        self.slice_view.EnableRenderOff()
+        super(CropModule, self).hideEvent(event)
     
+
     def load_patient(self, patient_dict):
         print("Crop module loading " + patient_dict['patient_ID'])
         self.slice_view.loadNrrd(patient_dict['volume_left'])
