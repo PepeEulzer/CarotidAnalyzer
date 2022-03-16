@@ -3,9 +3,9 @@ from PyQt5.QtWidgets import QWidget, QVBoxLayout, QSlider
 
 from modules.ImageSliceInteractor import ImageSliceInteractor
 
-class CropModule(QWidget):
+class SegmentationModule(QWidget):
     """
-    Module for cropping the left/right carotid from a full CTA volume.
+    Module for segmenting the left/right carotid.
     """
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -24,13 +24,13 @@ class CropModule(QWidget):
     def showEvent(self, event):
         self.slice_view.Enable()
         self.slice_view.EnableRenderOn()
-        super(CropModule, self).showEvent(event)
+        super(SegmentationModule, self).showEvent(event)
 
 
     def hideEvent(self, event):
         self.slice_view.Disable()
         self.slice_view.EnableRenderOff()
-        super(CropModule, self).hideEvent(event)
+        super(SegmentationModule, self).hideEvent(event)
     
 
     def load_patient(self, patient_dict):

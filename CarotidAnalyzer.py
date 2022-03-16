@@ -11,6 +11,8 @@ from PyQt5.QtGui import QColor
 
 from mainwindow_ui import Ui_MainWindow
 from modules.CropModule import CropModule
+from modules.CenterlineModule import CenterlineModule
+from modules.SegmentationModule import SegmentationModule
 
 class CarotidAnalyzer(QMainWindow, Ui_MainWindow):
     def __init__(self, parent=None):
@@ -25,7 +27,11 @@ class CarotidAnalyzer(QMainWindow, Ui_MainWindow):
 
         # instantiate modules
         self.crop_module = CropModule(self)
+        self.segmentation_module = SegmentationModule(self)
+        self.centerline_module = CenterlineModule(self)
         self.module_stack.addWidget(self.crop_module)
+        self.module_stack.addWidget(self.segmentation_module)
+        self.module_stack.addWidget(self.centerline_module)
 
         # only one module can be active
         self.processing_modules = [
@@ -151,6 +157,7 @@ class CarotidAnalyzer(QMainWindow, Ui_MainWindow):
         if len(dir) > 0:
             self.setWorkingDir(dir)
 
+
     def loadSelectedPatient(self):
         selected = self.tree_widget_data.currentItem()
         while selected.parent() != None:
@@ -160,6 +167,9 @@ class CarotidAnalyzer(QMainWindow, Ui_MainWindow):
             if (patient['patient_ID'] == patient_ID):
                 # update patient in all modules
                 self.crop_module.load_patient(patient)
+                self.segmentation_module.load_patient(patient)
+                self.centerline_module.load_patient(patient)
+                self.statusbar.showMessage(patient['patient_ID'])
                 break
 
     
@@ -187,6 +197,7 @@ class CarotidAnalyzer(QMainWindow, Ui_MainWindow):
     def viewSegmentationModule(self, on:bool):
         if on:
             self.uncheckInactiveModules(self.action_segmentation_module)
+            self.module_stack.setCurrentWidget(self.segmentation_module)
         else:
             self.module_stack.setCurrentWidget(self.empty_module)
 
@@ -194,6 +205,7 @@ class CarotidAnalyzer(QMainWindow, Ui_MainWindow):
     def viewCenterlineModule(self, on:bool):
         if on:
             self.uncheckInactiveModules(self.action_centerline_module)
+            self.module_stack.setCurrentWidget(self.centerline_module)
         else:
             self.module_stack.setCurrentWidget(self.empty_module)
 
