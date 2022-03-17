@@ -1,11 +1,15 @@
+from os import path
 from PyQt5.QtCore import Qt
-from PyQt5.QtWidgets import QWidget, QVBoxLayout, QSlider
+from PyQt5.QtWidgets import  (
+    QWidget, QVBoxLayout, QHBoxLayout, QSlider, QTabWidget,
+    QPushButton
+)
 
 from modules.ImageSliceInteractor import ImageSliceInteractor
 
-class SegmentationModule(QWidget):
+class SegmentationModuleTab(QWidget):
     """
-    Module for segmenting the left/right carotid.
+    Tab view of a right OR left side carotid for segmentation.
     """
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -24,18 +28,47 @@ class SegmentationModule(QWidget):
     def showEvent(self, event):
         self.slice_view.Enable()
         self.slice_view.EnableRenderOn()
-        super(SegmentationModule, self).showEvent(event)
+        super(SegmentationModuleTab, self).showEvent(event)
 
 
     def hideEvent(self, event):
         self.slice_view.Disable()
         self.slice_view.EnableRenderOff()
-        super(SegmentationModule, self).hideEvent(event)
+        super(SegmentationModuleTab, self).hideEvent(event)
     
 
-    def load_patient(self, patient_dict):
-        load_path = patient_dict['volume_left']
-        if load_path:
-            self.slice_view.loadNrrd(load_path)
+    def load_volume_seg(self, volume_file, seg_file):
+        if volume_file:
+            self.slice_view.loadNrrd(volume_file)
         else:
             self.slice_view.reset()
+
+
+    def close(self):
+        self.slice_view.Finalize()
+
+
+class SegmentationModule(QTabWidget):
+    """
+    Module for segmenting the left/right carotid.
+    """
+    def __init__(self, parent=None):
+        super().__init__(parent)
+
+        self.segmentation_module_left = SegmentationModuleTab()
+        self.segmentation_module_right = SegmentationModuleTab()
+
+        self.addTab(self.segmentation_module_left, "Left")
+        self.addTab(self.segmentation_module_right, "Right")
+
+
+    def load_patient(self, patient_dict):
+        self.segmentation_module_left.load_volume_seg(
+            patient_dict['volume_left'], patient_dict['seg_left'])
+        self.segmentation_module_right.load_volume_seg(
+            patient_dict['volume_right'], patient_dict['seg_right'])
+
+
+    def close(self):
+        self.segmentation_module_left.close()
+        self.segmentation_module_right.close()

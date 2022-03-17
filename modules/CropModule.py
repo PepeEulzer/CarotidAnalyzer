@@ -39,3 +39,7 @@ class CropModule(QWidget):
             self.slice_view.loadNrrd(load_path)
         else:
             self.slice_view.reset()
+
+
+    def close(self):
+        self.slice_view.Finalize()

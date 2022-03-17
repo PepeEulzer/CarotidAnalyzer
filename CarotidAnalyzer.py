@@ -262,12 +262,15 @@ class CarotidAnalyzer(QMainWindow, Ui_MainWindow):
             # save main window position and size
             settings.setValue("MainWindow/Geometry", QVariant(self.saveGeometry()))
             
-            # call view.Finalize() for all vtk views here
+            # call Finalize() for all vtk interactors
+            self.crop_module.close()
+            self.segmentation_module.close()
+            self.centerline_module.close()
             super(CarotidAnalyzer, self).closeEvent(event)
         else:
             event.ignore()
 
-        
+
 if __name__ == "__main__":
     app = QApplication(sys.argv)
     app.setOrganizationName("VisGroup Uni Jena")
