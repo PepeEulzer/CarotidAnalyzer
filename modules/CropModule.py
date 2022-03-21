@@ -1,7 +1,7 @@
 from PyQt5.QtCore import Qt
 from PyQt5.QtWidgets import QWidget, QVBoxLayout, QSlider
 
-from modules.ImageSliceInteractor import ImageSliceInteractor
+from modules.Interactors import ImageSliceInteractor
 
 class CropModule(QWidget):
     """

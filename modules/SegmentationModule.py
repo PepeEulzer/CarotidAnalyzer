@@ -4,8 +4,9 @@ from PyQt5.QtWidgets import  (
     QWidget, QVBoxLayout, QHBoxLayout, QSlider, QTabWidget,
     QPushButton
 )
+from vmtk import vmtkscripts
 
-from modules.ImageSliceInteractor import ImageSliceInteractor
+from modules.Interactors import ImageSliceInteractor, IsosurfaceInteractor
 
 class SegmentationModuleTab(QWidget):
     """
@@ -16,13 +17,21 @@ class SegmentationModuleTab(QWidget):
         
         self.slice_view_slider = QSlider(Qt.Horizontal)
         self.slice_view = ImageSliceInteractor(self.slice_view_slider, self)
+        self.model_view = IsosurfaceInteractor(self)
 
-        self.slice_view_layout = QVBoxLayout(self)
+
+        self.slice_view_layout = QVBoxLayout()
         self.slice_view_layout.addWidget(self.slice_view_slider)
         self.slice_view_layout.addWidget(self.slice_view)
 
+        self.top_layout = QHBoxLayout(self)
+        self.top_layout.addLayout(self.slice_view_layout)
+        self.top_layout.addWidget(self.model_view)
+
         self.slice_view.Initialize()
         self.slice_view.Start()
+        self.model_view.Initialize()
+        self.model_view.Start()
 
 
     def showEvent(self, event):
@@ -42,10 +51,16 @@ class SegmentationModuleTab(QWidget):
             self.slice_view.loadNrrd(volume_file)
         else:
             self.slice_view.reset()
+        
+        if seg_file:
+            self.model_view.loadNrrd(seg_file)
+        else:
+            self.model_view.reset()
 
 
     def close(self):
         self.slice_view.Finalize()
+        self.model_view.Finalize()
 
 
 class SegmentationModule(QTabWidget):
