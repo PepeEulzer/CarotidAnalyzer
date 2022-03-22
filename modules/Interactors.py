@@ -1,17 +1,20 @@
 import numpy as np
 import vtk
+from PyQt5.QtCore import pyqtSignal
 from vtk.qt.QVTKRenderWindowInteractor import QVTKRenderWindowInteractor
 from vmtk import vmtkscripts
+
+COLOR_LUMEN = (216/255, 101/255, 79/255)
+COLOR_PLAQUE = (241/255, 214/255, 145/255)
 
 class ImageSliceInteractor(QVTKRenderWindowInteractor):
     """
     Displays an image view of a volume slice in z-direction.
     Interactions: Pan, zoom, scroll slices.
     """
-    def __init__(self, slider, parent=None):
+    slice_changed = pyqtSignal(int)
+    def __init__(self, parent=None):
         super().__init__(parent)
-        self.slider = slider
-        self.slider.valueChanged[int].connect(self.slider_moved)
         self.interactor_style = vtk.vtkInteractorStyleImage()
         self.interactor_style.AddObserver("MouseWheelForwardEvent", self.mouseWheelForward)
         self.interactor_style.AddObserver("MouseWheelBackwardEvent", self.mouseWheelBackward)
@@ -46,26 +49,27 @@ class ImageSliceInteractor(QVTKRenderWindowInteractor):
         cam.SetPosition(pos)
 
 
-    def slider_moved(self, pos):
-        self.slice = pos
-        self.image_mapper.SetSliceNumber(pos)
+    def setSlice(self, slice_nr):
+        self.slice = slice_nr
+        self.image_mapper.SetSliceNumber(slice_nr)
         self.GetRenderWindow().Render()
+        self.slice_changed.emit(self.slice)
 
 
     def mouseWheelForward(self, obj, event):
         if self.slice < self.max_slice:
             self.slice += 1
             self.image_mapper.SetSliceNumber(self.slice)
-            self.slider.setSliderPosition(self.slice)
             self.GetRenderWindow().Render()
+            self.slice_changed.emit(self.slice)
 
 
     def mouseWheelBackward(self, obj, event):
         if self.slice > self.min_slice:
             self.slice -= 1
             self.image_mapper.SetSliceNumber(self.slice)
-            self.slider.setSliderPosition(self.slice)
             self.GetRenderWindow().Render()
+            self.slice_changed.emit(self.slice)
 
 
     def loadNrrd(self, path):
@@ -77,8 +81,6 @@ class ImageSliceInteractor(QVTKRenderWindowInteractor):
         self.min_slice = self.image_mapper.GetSliceNumberMinValue()
         self.max_slice = self.image_mapper.GetSliceNumberMaxValue()
         self.slice = self.min_slice
-        self.slider.setRange(self.min_slice, self.max_slice)
-        self.slider.setSliderPosition(self.slice)
 
         # re-focus the camera
         self.renderer.ResetCamera()
@@ -92,8 +94,6 @@ class ImageSliceInteractor(QVTKRenderWindowInteractor):
         self.min_slice = 0
         self.max_slice = 0
         self.slice = 0
-        self.slider.setRange(0, 100)
-        self.slider.setSliderPosition(0)
         self.GetRenderWindow().Render()
 
 
@@ -106,7 +106,7 @@ class IsosurfaceInteractor(QVTKRenderWindowInteractor):
         super().__init__(parent)
         self.SetInteractorStyle(vtk.vtkInteractorStyleTrackballCamera())
         self.label_map = vtk.vtkImageData()
-        
+
         # build isosurface, mapper, actor pipeline
         self.padding = vtk.vtkImageConstantPad()
         self.padding.SetConstant(0)
@@ -121,7 +121,9 @@ class IsosurfaceInteractor(QVTKRenderWindowInteractor):
         self.smoother_lumen.SetPassBand(0.005)
         self.mapper_lumen = vtk.vtkPolyDataMapper()
         self.mapper_lumen.SetInputConnection(self.smoother_lumen.GetOutputPort())
+        self.mapper_lumen.ScalarVisibilityOff()
         self.actor_lumen = vtk.vtkActor()
+        self.actor_lumen.GetProperty().SetColor(COLOR_LUMEN)
         self.actor_lumen.SetMapper(self.mapper_lumen)
 
         self.marching_plaque = vtk.vtkDiscreteMarchingCubes()
@@ -133,7 +135,9 @@ class IsosurfaceInteractor(QVTKRenderWindowInteractor):
         self.smoother_plaque.SetPassBand(0.005)
         self.mapper_plaque = vtk.vtkPolyDataMapper()
         self.mapper_plaque.SetInputConnection(self.smoother_plaque.GetOutputPort())
+        self.mapper_plaque.ScalarVisibilityOff()
         self.actor_plaque = vtk.vtkActor()
+        self.actor_plaque.GetProperty().SetColor(COLOR_PLAQUE)
         self.actor_plaque.SetMapper(self.mapper_plaque)
 
         self.renderer = vtk.vtkRenderer()
@@ -142,16 +146,29 @@ class IsosurfaceInteractor(QVTKRenderWindowInteractor):
 
 
     def loadNrrd(self, path):
+        # read the file
         reader = vmtkscripts.vmtkImageReader()
         reader.InputFileName = path
         reader.Execute()
         self.label_map = reader.Image
+        
+        # convert to check if plaque actor is necessary
+        img_to_numpy = vmtkscripts.vmtkImageToNumpy()
+        img_to_numpy.Image = self.label_map
+        img_to_numpy.Execute()
+        
+        # add padding
         extent = np.array(self.label_map.GetExtent())
         extent += np.array([-1, 1, -1, 1, -1, 1])
         self.padding.SetInputData(self.label_map)
         self.padding.SetOutputWholeExtent(extent)
+        
+        # update the scene (pipeline triggers automatically)
         self.renderer.AddActor(self.actor_lumen)
-        self.renderer.AddActor(self.actor_plaque)
+        if 1.0 in img_to_numpy.ArrayDict['PointData']['ImageScalars']:
+            self.renderer.AddActor(self.actor_plaque)
+        else:
+            self.renderer.RemoveActor(self.actor_plaque)
         self.renderer.ResetCamera()
         self.GetRenderWindow().Render()
 

@@ -11,7 +11,7 @@ class CropModule(QWidget):
         super().__init__(parent)
         
         self.slice_view_slider = QSlider(Qt.Horizontal)
-        self.slice_view = ImageSliceInteractor(self.slice_view_slider, self)
+        self.slice_view = ImageSliceInteractor(self)
 
         self.slice_view_layout = QVBoxLayout(self)
         self.slice_view_layout.addWidget(self.slice_view_slider)
