@@ -6,12 +6,7 @@ from PyQt5.QtWidgets import  (
 )
 
 from modules.Interactors import ImageSliceInteractor, IsosurfaceInteractor
-
-COLOR_LUMEN_DARK = (55/255, 22/255, 15/255)
-COLOR_PLAQUE_DARK = (81/255, 69/255, 40/255)
-
-COLOR_LUMEN = (216/255, 101/255, 79/255)
-COLOR_PLAQUE = (241/255, 214/255, 145/255)
+from defaults import *
 
 class SegmentationModuleTab(QWidget):
     """
@@ -35,8 +30,10 @@ class SegmentationModuleTab(QWidget):
         self.top_layout.addWidget(self.model_view)
 
         # shared vtk objects
-        self.lumen_outline_actor = self.__createOutlineActor(self.model_view.smoother_lumen.GetOutputPort(), COLOR_LUMEN)
-        self.plaque_outline_actor = self.__createOutlineActor(self.model_view.smoother_plaque.GetOutputPort(), COLOR_PLAQUE)
+        self.lumen_outline_actor3D, self.lumen_outline_actor2D = self.__createOutlineActors(
+            self.model_view.smoother_lumen.GetOutputPort(), COLOR_LUMEN_DARK, COLOR_LUMEN)
+        self.plaque_outline_actor3D, self.plaque_outline_actor2D = self.__createOutlineActors(
+            self.model_view.smoother_plaque.GetOutputPort(), COLOR_PLAQUE_DARK, COLOR_PLAQUE)
 
         # connect signals/slots
         self.slice_view.slice_changed[int].connect(self.sliceChanged)
@@ -48,19 +45,24 @@ class SegmentationModuleTab(QWidget):
         self.model_view.Initialize()
         self.model_view.Start()
 
-    def __createOutlineActor(self, output_port, color):
+
+    def __createOutlineActors(self, output_port, color3D, color2D):
         cutter = vtk.vtkCutter()
         cutter.SetInputConnection(output_port)
         cutter.SetCutFunction(self.slice_view.image_mapper.GetSlicePlane())
         mapper = vtk.vtkPolyDataMapper()
         mapper.ScalarVisibilityOff()
         mapper.SetInputConnection(cutter.GetOutputPort())
-        actor = vtk.vtkActor()
-        actor.SetMapper(mapper)
-        actor.GetProperty().SetColor(color)
-        actor.GetProperty().SetLineWidth(4)
-        actor.GetProperty().RenderLinesAsTubesOn()
-        return actor
+        actor3D = vtk.vtkActor()
+        actor3D.SetMapper(mapper)
+        actor3D.GetProperty().SetColor(color3D)
+        actor3D.GetProperty().SetLineWidth(5)
+        actor3D.GetProperty().RenderLinesAsTubesOn()
+        actor2D = vtk.vtkActor()
+        actor2D.SetMapper(mapper)
+        actor2D.GetProperty().SetColor(color2D)
+        actor2D.GetProperty().SetLineWidth(2)
+        return actor3D, actor2D
 
 
     def sliceChanged(self, slice_nr):
@@ -93,16 +95,16 @@ class SegmentationModuleTab(QWidget):
         
         if seg_file:
             self.model_view.loadNrrd(seg_file)
-            self.model_view.renderer.AddActor(self.lumen_outline_actor)
-            self.slice_view.renderer.AddActor(self.lumen_outline_actor)
-            self.model_view.renderer.AddActor(self.plaque_outline_actor)
-            self.slice_view.renderer.AddActor(self.plaque_outline_actor)
+            self.model_view.renderer.AddActor(self.lumen_outline_actor3D)
+            self.slice_view.renderer.AddActor(self.lumen_outline_actor2D)
+            self.model_view.renderer.AddActor(self.plaque_outline_actor3D)
+            self.slice_view.renderer.AddActor(self.plaque_outline_actor2D)
         else:
             self.model_view.reset()
-            self.model_view.renderer.RemoveActor(self.lumen_outline_actor)
-            self.slice_view.renderer.RemoveActor(self.lumen_outline_actor)
-            self.model_view.renderer.RemoveActor(self.plaque_outline_actor)
-            self.slice_view.renderer.RemoveActor(self.plaque_outline_actor)
+            self.model_view.renderer.RemoveActor(self.lumen_outline_actor3D)
+            self.slice_view.renderer.RemoveActor(self.lumen_outline_actor2D)
+            self.model_view.renderer.RemoveActor(self.plaque_outline_actor3D)
+            self.slice_view.renderer.RemoveActor(self.plaque_outline_actor2D)
 
 
     def close(self):

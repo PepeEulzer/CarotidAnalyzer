@@ -4,8 +4,7 @@ from PyQt5.QtCore import pyqtSignal
 from vtk.qt.QVTKRenderWindowInteractor import QVTKRenderWindowInteractor
 from vmtk import vmtkscripts
 
-COLOR_LUMEN = (216/255, 101/255, 79/255)
-COLOR_PLAQUE = (241/255, 214/255, 145/255)
+from defaults import *
 
 class ImageSliceInteractor(QVTKRenderWindowInteractor):
     """
@@ -95,6 +94,7 @@ class ImageSliceInteractor(QVTKRenderWindowInteractor):
         self.max_slice = 0
         self.slice = 0
         self.GetRenderWindow().Render()
+
 
 
 class IsosurfaceInteractor(QVTKRenderWindowInteractor):

@@ -54,6 +54,9 @@ class CarotidAnalyzer(QMainWindow, Ui_MainWindow):
         self.action_quit.triggered.connect(self.close)
         self.button_load_file.clicked.connect(self.loadSelectedPatient)
 
+        self.centerline_module.centerline_module_left.data_modified.connect(self.changesMade)
+        self.centerline_module.centerline_module_right.data_modified.connect(self.changesMade)
+
         # restore state properties
         settings = QSettings()
         # geometry = settings.value("MainWindow/Geometry")
@@ -216,17 +219,26 @@ class CarotidAnalyzer(QMainWindow, Ui_MainWindow):
         else:
             self.module_stack.setCurrentWidget(self.empty_module)
 
+
+    def changesMade(self):
+        self.unsaved_changes = True
+        self.action_discard_changes.setEnabled(True)
+        self.action_save_and_propagate.setEnabled(True)
     
+
     def discardChanges(self):
-        print("Call discard function of active module.")
+        self.module_stack.currentWidget().discard()
         self.action_discard_changes.setEnabled(False)
         self.action_save_and_propagate.setEnabled(False)
+        self.unsaved_changes = False
 
     
     def saveAndPropagate(self):
-        print("Call save function of active module. Update following steps.")
+        # TODO update following steps
+        self.module_stack.currentWidget().discard()
         self.action_discard_changes.setEnabled(False)
         self.action_save_and_propagate.setEnabled(False)
+        self.unsaved_changes = False
 
     
     def okToClose(self):
