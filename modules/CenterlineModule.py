@@ -1,3 +1,5 @@
+import os
+
 import vtk
 from vmtk import vmtkscripts
 from vtk.qt.QVTKRenderWindowInteractor import QVTKRenderWindowInteractor
@@ -14,7 +16,7 @@ class CenterlineModuleTab(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.lumen_active = False
-        self.centerlines_active = False
+        self.centerlines = None
 
         self.button_compute = QPushButton("Compute New Centerlines")
         self.button_compute.clicked.connect(self.computeCenterlines)
@@ -59,9 +61,10 @@ class CenterlineModuleTab(QWidget):
         centerlines_script = vmtkscripts.vmtkCenterlines()
         centerlines_script.Surface = self.reader_lumen.GetOutput()
         centerlines_script.Execute()
-        self.mapper_centerline.SetInputData(centerlines_script.Centerlines)
+        self.centerlines = centerlines_script.Centerlines
+        self.mapper_centerline.SetInputData(self.centerlines)
+        self.renderer.AddActor(self.actor_centerline)
         self.centerline_view.GetRenderWindow().Render()
-        self.centerlines_active = True
         self.data_modified.emit()
 
 
@@ -86,17 +89,28 @@ class CenterlineModuleTab(QWidget):
                 self.reader_centerline.SetFileName(centerline_file)
                 self.mapper_centerline.SetInputConnection(self.reader_centerline.GetOutputPort())
                 self.renderer.AddActor(self.actor_centerline)
-                self.centerlines_active = True
+                self.centerlines = self.reader_centerline.GetOutput()
             else:
                 self.renderer.RemoveActor(self.actor_centerline)
-                self.centerlines_active = False
+                self.centerlines = None
             self.renderer.ResetCamera()
         else:
             self.lumen_active = False
-            self.centerlines_active = False
+            self.centerlines = None
             self.renderer.RemoveActor(self.actor_lumen)
             self.renderer.RemoveActor(self.actor_centerline)
         self.centerline_view.GetRenderWindow().Render()
+
+
+    def saveChanges(self, path):
+        # catch if one side has something to save, other side not
+        if self.centerlines == None:
+            return
+        writer = vtk.vtkXMLPolyDataWriter()
+        writer.SetFileName(path)
+        writer.SetInputData(self.centerlines)
+        writer.Write()
+
 
     def close(self):
         self.centerline_view.Finalize()
@@ -108,6 +122,7 @@ class CenterlineModule(QTabWidget):
     Module for creating centerlines on vessel trees.
     User selects start/endpoints.
     """
+    new_centerlines = pyqtSignal()
     def __init__(self, parent=None):
         super().__init__(parent)
         self.patient_dict = None
@@ -126,12 +141,18 @@ class CenterlineModule(QTabWidget):
         self.centerline_module_right.loadModels(
             patient_dict['lumen_model_right'], patient_dict['centerlines_right'])
 
+
     def save(self):
-        print("Centerline module saving changes made...")
+        patient_ID = self.patient_dict['patient_ID']
+        base_path  = self.patient_dict['base_path']
+        path_left  = os.path.join(base_path, "models", patient_ID + "_left_lumen_centerlines.vtp")
+        path_right = os.path.join(base_path, "models", patient_ID + "_right_lumen_centerlines.vtp")
+        self.centerline_module_left.saveChanges(path_left)
+        self.centerline_module_right.saveChanges(path_right)
+        self.new_centerlines.emit()
 
     
     def discard(self):
-        print("Centerline module discarding changes made...")
         self.load_patient(self.patient_dict)
 
 

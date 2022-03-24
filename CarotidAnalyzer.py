@@ -9,6 +9,7 @@ from PyQt5.QtWidgets import (
 )
 from PyQt5.QtGui import QColor
 
+from defaults import *
 from mainwindow_ui import Ui_MainWindow
 from modules.CropModule import CropModule
 from modules.CenterlineModule import CenterlineModule
@@ -24,6 +25,8 @@ class CarotidAnalyzer(QMainWindow, Ui_MainWindow):
         self.compute_threads_active = 0
         self.working_dir = ""
         self.patient_data = []
+        self.active_patient_dict = {}
+        self.active_patient_tree_widget_item = None
 
         # instantiate modules
         self.crop_module = CropModule(self)
@@ -56,6 +59,7 @@ class CarotidAnalyzer(QMainWindow, Ui_MainWindow):
 
         self.centerline_module.centerline_module_left.data_modified.connect(self.changesMade)
         self.centerline_module.centerline_module_right.data_modified.connect(self.changesMade)
+        self.centerline_module.new_centerlines.connect(self.newCenterlines)
 
         # restore state properties
         settings = QSettings()
@@ -113,30 +117,27 @@ class CarotidAnalyzer(QMainWindow, Ui_MainWindow):
             add_if_exists("centerlines_right", "_right_lumen_centerlines.vtp", True)
             self.patient_data.append(patient_dict)
 
-            # unicode symbols
-            sym_yes = "\u2714"
-            sym_no = "\u2716"
-            #sym_endash = "\u2013"
+
             
             entry_volume = ["CTA Volume", "", ""]
-            entry_volume[1] = sym_yes if patient_dict["volume_left"] else sym_no
-            entry_volume[2] = sym_yes if patient_dict["volume_right"] else sym_no
+            entry_volume[1] = SYM_YES if patient_dict["volume_left"] else SYM_NO
+            entry_volume[2] = SYM_YES if patient_dict["volume_right"] else SYM_NO
 
             entry_seg = ["Segmentation", "", ""]
-            entry_seg[1] = sym_yes if patient_dict["seg_left"] else sym_no
-            entry_seg[2] = sym_yes if patient_dict["seg_right"] else sym_no
+            entry_seg[1] = SYM_YES if patient_dict["seg_left"] else SYM_NO
+            entry_seg[2] = SYM_YES if patient_dict["seg_right"] else SYM_NO
 
             entry_lumen = ["Lumen Model", "", ""]
-            entry_lumen[1] = sym_yes if patient_dict["lumen_model_left"] else sym_no
-            entry_lumen[2] = sym_yes if patient_dict["lumen_model_right"] else sym_no
+            entry_lumen[1] = SYM_YES if patient_dict["lumen_model_left"] else SYM_NO
+            entry_lumen[2] = SYM_YES if patient_dict["lumen_model_right"] else SYM_NO
 
             entry_plaque = ["Plaque Model", "", ""]
-            entry_plaque[1] = sym_yes if patient_dict["plaque_model_left"] else sym_no
-            entry_plaque[2] = sym_yes if patient_dict["plaque_model_right"] else sym_no
+            entry_plaque[1] = SYM_YES if patient_dict["plaque_model_left"] else SYM_NO
+            entry_plaque[2] = SYM_YES if patient_dict["plaque_model_right"] else SYM_NO
 
             entry_centerlines = ["Centerlines", "", ""]
-            entry_centerlines[1] = sym_yes if patient_dict["centerlines_left"] else sym_no
-            entry_centerlines[2] = sym_yes if patient_dict["centerlines_right"] else sym_no
+            entry_centerlines[1] = SYM_YES if patient_dict["centerlines_left"] else SYM_NO
+            entry_centerlines[2] = SYM_YES if patient_dict["centerlines_right"] else SYM_NO
 
             entry_patient = QTreeWidgetItem([pID, "", ""])
             background_color = QColor(240, 240, 240)
@@ -165,10 +166,12 @@ class CarotidAnalyzer(QMainWindow, Ui_MainWindow):
         selected = self.tree_widget_data.currentItem()
         while selected.parent() != None:
             selected = selected.parent()
+        self.active_patient_tree_widget_item = selected
         patient_ID = selected.text(0)
         for patient in self.patient_data:
             if (patient['patient_ID'] == patient_ID):
                 # update patient in all modules
+                self.active_patient_dict = patient
                 self.crop_module.load_patient(patient)
                 self.segmentation_module.load_patient(patient)
                 self.centerline_module.load_patient(patient)
@@ -234,13 +237,28 @@ class CarotidAnalyzer(QMainWindow, Ui_MainWindow):
 
     
     def saveAndPropagate(self):
-        # TODO update following steps
-        self.module_stack.currentWidget().discard()
+        # calls save on the current widget
+        # propagation must be called through widget signals of type "newX"
+        self.module_stack.currentWidget().save()
         self.action_discard_changes.setEnabled(False)
         self.action_save_and_propagate.setEnabled(False)
         self.unsaved_changes = False
 
     
+    def newCenterlines(self):
+        patient_ID = self.active_patient_dict['patient_ID']
+        base_path  = self.active_patient_dict['base_path']
+        path_left = os.path.join(base_path, "models", patient_ID + "_left_lumen_centerlines.vtp")
+        path_right = os.path.join(base_path, "models", patient_ID + "_right_lumen_centerlines.vtp")
+        centerlines_item = self.active_patient_tree_widget_item.child(4)
+        if os.path.exists(path_left):
+            self.active_patient_dict['centerlines_left'] = path_left
+            centerlines_item.setText(1, SYM_YES)
+        if os.path.exists(path_right):
+            self.active_patient_dict['centerlines_right'] = path_right
+            centerlines_item.setText(2, SYM_YES)
+
+
     def okToClose(self):
         if self.unsaved_changes:
             dlg = QMessageBox(self)
