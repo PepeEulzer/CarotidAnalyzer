@@ -134,7 +134,7 @@ class CenterlineModule(QTabWidget):
         self.addTab(self.centerline_module_right, "Right")
 
 
-    def load_patient(self, patient_dict):
+    def loadPatient(self, patient_dict):
         self.patient_dict = patient_dict
         self.centerline_module_left.loadModels(
             patient_dict['lumen_model_left'], patient_dict['centerlines_left'])
@@ -153,7 +153,7 @@ class CenterlineModule(QTabWidget):
 
     
     def discard(self):
-        self.load_patient(self.patient_dict)
+        self.loadPatient(self.patient_dict)
 
 
     def close(self):

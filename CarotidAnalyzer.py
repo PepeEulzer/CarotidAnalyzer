@@ -117,8 +117,6 @@ class CarotidAnalyzer(QMainWindow, Ui_MainWindow):
             add_if_exists("centerlines_right", "_right_lumen_centerlines.vtp", True)
             self.patient_data.append(patient_dict)
 
-
-            
             entry_volume = ["CTA Volume", "", ""]
             entry_volume[1] = SYM_YES if patient_dict["volume_left"] else SYM_NO
             entry_volume[2] = SYM_YES if patient_dict["volume_right"] else SYM_NO
@@ -172,9 +170,9 @@ class CarotidAnalyzer(QMainWindow, Ui_MainWindow):
             if (patient['patient_ID'] == patient_ID):
                 # update patient in all modules
                 self.active_patient_dict = patient
-                self.crop_module.load_patient(patient)
-                self.segmentation_module.load_patient(patient)
-                self.centerline_module.load_patient(patient)
+                self.crop_module.loadPatient(patient)
+                self.segmentation_module.loadPatient(patient)
+                self.centerline_module.loadPatient(patient)
                 self.statusbar.showMessage(patient['patient_ID'])
                 break
 

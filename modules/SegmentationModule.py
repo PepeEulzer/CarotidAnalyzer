@@ -127,7 +127,7 @@ class SegmentationModule(QTabWidget):
         self.addTab(self.segmentation_module_right, "Right")
 
 
-    def load_patient(self, patient_dict):
+    def loadPatient(self, patient_dict):
         self.segmentation_module_left.loadVolumeSeg(
             patient_dict['volume_left'], patient_dict['seg_left'])
         self.segmentation_module_right.loadVolumeSeg(
