@@ -24,6 +24,10 @@ class CenterlineModuleTab(QWidget):
         self.centerline_view.SetInteractorStyle(vtk.vtkInteractorStyleTrackballCamera())
         self.renderer = vtk.vtkRenderer()
         self.renderer.SetBackground(1,1,1)
+        cam = self.renderer.GetActiveCamera()
+        cam.SetPosition(0, 0, -100)
+        cam.SetFocalPoint(0, 0, 0)
+        cam.SetViewUp(0, -1, 0)
         self.centerline_view.GetRenderWindow().AddRenderer(self.renderer)
 
         self.slice_view_layout = QVBoxLayout(self)
@@ -130,25 +134,25 @@ class CenterlineModule(QTabWidget):
         self.centerline_module_left = CenterlineModuleTab()
         self.centerline_module_right = CenterlineModuleTab()
 
-        self.addTab(self.centerline_module_left, "Left")
         self.addTab(self.centerline_module_right, "Right")
+        self.addTab(self.centerline_module_left, "Left")
 
 
     def loadPatient(self, patient_dict):
         self.patient_dict = patient_dict
-        self.centerline_module_left.loadModels(
-            patient_dict['lumen_model_left'], patient_dict['centerlines_left'])
         self.centerline_module_right.loadModels(
             patient_dict['lumen_model_right'], patient_dict['centerlines_right'])
+        self.centerline_module_left.loadModels(
+            patient_dict['lumen_model_left'], patient_dict['centerlines_left'])
 
 
     def save(self):
         patient_ID = self.patient_dict['patient_ID']
         base_path  = self.patient_dict['base_path']
-        path_left  = os.path.join(base_path, "models", patient_ID + "_left_lumen_centerlines.vtp")
         path_right = os.path.join(base_path, "models", patient_ID + "_right_lumen_centerlines.vtp")
-        self.centerline_module_left.saveChanges(path_left)
+        path_left  = os.path.join(base_path, "models", patient_ID + "_left_lumen_centerlines.vtp")
         self.centerline_module_right.saveChanges(path_right)
+        self.centerline_module_left.saveChanges(path_left)
         self.new_centerlines.emit()
 
     
@@ -157,5 +161,5 @@ class CenterlineModule(QTabWidget):
 
 
     def close(self):
-        self.centerline_module_left.close()
         self.centerline_module_right.close()
+        self.centerline_module_left.close()

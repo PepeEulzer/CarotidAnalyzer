@@ -21,31 +21,23 @@ class ImageSliceInteractor(QVTKRenderWindowInteractor):
         self.slice = 0
         self.min_slice = 0
         self.max_slice = 0
-        self.image = vtk.vtkImageData()
 
         # build image mapper, actor pipeline
         self.image_mapper = vtk.vtkOpenGLImageSliceMapper()
         self.image_mapper.SliceAtFocalPointOff()
         self.image_mapper.SetNumberOfThreads(1)
-        self.image_mapper.SetInputData(self.image)
 
         self.image_actor = vtk.vtkImageActor()
         self.image_actor.SetMapper(self.image_mapper)
 
         self.renderer = vtk.vtkRenderer()
         self.renderer.SetBackground(0,0,0)
-        self.renderer.AddActor(self.image_actor)
-        self.GetRenderWindow().AddRenderer(self.renderer)
-
-        # set the amera to the "backside" (view in positive z)
-        # for correct patient orientation
         cam = self.renderer.GetActiveCamera()
         cam.ParallelProjectionOn()
-        proj_dir = np.array(cam.GetDirectionOfProjection())
-        proj_dist = np.array(cam.GetDistance())
-        pos = np.array(cam.GetPosition())
-        pos = pos + 2 * proj_dist * proj_dir
-        cam.SetPosition(pos)
+        cam.SetPosition(0, 0, -100)
+        cam.SetFocalPoint(0, 0, 0)
+        cam.SetViewUp(0, -1, 0)
+        self.GetRenderWindow().AddRenderer(self.renderer)
 
 
     def setSlice(self, slice_nr):
@@ -75,26 +67,39 @@ class ImageSliceInteractor(QVTKRenderWindowInteractor):
         reader = vmtkscripts.vmtkImageReader()
         reader.InputFileName = path
         reader.Execute()
-        self.image = reader.Image
+        image = reader.Image
         if flip_x_y:
-            sx, sy, sz = self.image.GetSpacing()
-            ox, oy, oz = self.image.GetOrigin()
-            self.image.SetSpacing(-sx, -sy, sz)
-            self.image.SetOrigin(-ox, -oy, oz)
-        self.image_mapper.SetInputData(self.image)
+            sx, sy, sz = image.GetSpacing()
+            ox, oy, oz = image.GetOrigin()
+            image.SetSpacing(-sx, -sy, sz)
+            image.SetOrigin(-ox, -oy, oz)
+        self.image_mapper.SetInputData(image)
         self.min_slice = self.image_mapper.GetSliceNumberMinValue()
         self.max_slice = self.image_mapper.GetSliceNumberMaxValue()
         self.slice = self.min_slice
 
         # re-focus the camera
+        self.renderer.AddActor(self.image_actor)
         self.renderer.ResetCamera()
-        self.renderer.GetActiveCamera().SetClippingRange(10, 1000)
+        self.renderer.GetActiveCamera().SetClippingRange(10, 2000)
+        self.GetRenderWindow().Render()
+
+    
+    def setImage(self, image):
+        self.image_mapper.SetInputData(image)
+        self.min_slice = self.image_mapper.GetSliceNumberMinValue()
+        self.max_slice = self.image_mapper.GetSliceNumberMaxValue()
+        self.slice = self.min_slice
+
+        # re-focus the camera
+        self.renderer.AddActor(self.image_actor)
+        self.renderer.ResetCamera()
+        self.renderer.GetActiveCamera().SetClippingRange(10, 2000)
         self.GetRenderWindow().Render()
 
     
     def reset(self):
-        self.image = vtk.vtkImageData()
-        self.image_mapper.SetInputData(self.image)
+        self.renderer.RemoveActor(self.image_actor)
         self.min_slice = 0
         self.max_slice = 0
         self.slice = 0
@@ -148,6 +153,13 @@ class IsosurfaceInteractor(QVTKRenderWindowInteractor):
         self.renderer = vtk.vtkRenderer()
         self.renderer.SetBackground(1,1,1)
         self.GetRenderWindow().AddRenderer(self.renderer)
+        
+        # set the camera to the "backside" (view in positive z)
+        # for correct patient orientation
+        cam = self.renderer.GetActiveCamera()
+        cam.SetPosition(0, 0, -100)
+        cam.SetFocalPoint(0, 0, 0)
+        cam.SetViewUp(0, -1, 0)
 
 
     def loadNrrd(self, path):
@@ -194,7 +206,6 @@ class VolumeRenderingInteractor(QVTKRenderWindowInteractor):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.SetInteractorStyle(vtk.vtkInteractorStyleTrackballCamera())
-        self.image = vtk.vtkImageData()
 
         # ====================================================================
         # Initialization: CTA context visualization
@@ -246,6 +257,10 @@ class VolumeRenderingInteractor(QVTKRenderWindowInteractor):
         # ====================================================================
         self.renderer = vtk.vtkRenderer()
         self.renderer.SetBackground(1,1,1)
+        cam = self.renderer.GetActiveCamera()
+        cam.SetPosition(0, 0, -100)
+        cam.SetFocalPoint(0, 0, 0)
+        cam.SetViewUp(0, -1, 0)
         self.GetRenderWindow().AddRenderer(self.renderer)
 
 
@@ -294,28 +309,14 @@ class VolumeRenderingInteractor(QVTKRenderWindowInteractor):
         self.gradient_function.AddPoint( 3600.0, op1, 0.5, 0.0)
 
 
-    def loadNrrd(self, path):
-        reader = vmtkscripts.vmtkImageReader()
-        reader.InputFileName = path
-        reader.Execute()
-        self.image = reader.Image
-        self.CTA_mapper.SetInputData(self.image)
-
+    def setImage(self, image):
+        self.CTA_mapper.SetInputData(image)
         self.renderer.AddVolume(self.CTA_volume)
         self.renderer.ResetCamera()
         self.GetRenderWindow().Render()
 
-
-    # def setImage(self, image):
-    #     self.image = image
-    #     self.CTA_mapper.SetInputData(image)
-    #     self.renderer.AddVolume(self.CTA_volume)
-    #     self.renderer.ResetCamera()
-    #     self.GetRenderWindow().Render()
-
     
     def reset(self):
-        self.image = vtk.vtkImageData()
         self.renderer.RemoveVolume(self.CTA_volume)
         self.GetRenderWindow().Render()
 

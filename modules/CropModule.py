@@ -10,6 +10,7 @@ class CropModule(QWidget):
     """
     def __init__(self, parent=None):
         super().__init__(parent)
+        self.image = None
         
         self.slice_view = ImageSliceInteractor(self)
         self.volume_view = VolumeRenderingInteractor(self)
@@ -73,8 +74,12 @@ class CropModule(QWidget):
         volume_file = patient_dict['volume_raw']
         print("laoding", volume_file)
         if volume_file:
-            self.slice_view.loadNrrd(volume_file, flip_x_y=True)
-            self.volume_view.loadNrrd(volume_file)
+            reader = vmtkscripts.vmtkImageReader()
+            reader.InputFileName = volume_file
+            reader.Execute()
+            self.image = reader.Image
+            self.volume_view.setImage(self.image)
+            self.slice_view.setImage(self.image)
             self.slice_view_slider.setRange(
                 self.slice_view.min_slice,
                 self.slice_view.max_slice
@@ -82,9 +87,11 @@ class CropModule(QWidget):
             self.slice_view_slider.setSliderPosition(self.slice_view.slice)
 
         else:
+            self.image = None
             self.slice_view.reset()
             self.volume_view.reset()
 
 
     def close(self):
         self.slice_view.Finalize()
+        self.volume_view.Finalize()

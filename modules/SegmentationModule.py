@@ -17,8 +17,10 @@ class SegmentationModuleTab(QWidget):
         
         # on-screen objects
         self.slice_view = ImageSliceInteractor(self)
+        self.slice_view.renderer.GetActiveCamera().SetViewUp(0, 1, 0)
         self.slice_view_slider = QSlider(Qt.Horizontal)
         self.model_view = IsosurfaceInteractor(self)
+        self.model_view.renderer.GetActiveCamera().SetViewUp(0, 1, 0)
 
         # add everything to a layout
         self.slice_view_layout = QVBoxLayout()
@@ -84,7 +86,7 @@ class SegmentationModuleTab(QWidget):
 
     def loadVolumeSeg(self, volume_file, seg_file):
         if volume_file:
-            self.slice_view.loadNrrd(volume_file)
+            self.slice_view.loadNrrd(volume_file, False)
             self.slice_view_slider.setRange(
                 self.slice_view.min_slice,
                 self.slice_view.max_slice
@@ -123,17 +125,17 @@ class SegmentationModule(QTabWidget):
         self.segmentation_module_left = SegmentationModuleTab()
         self.segmentation_module_right = SegmentationModuleTab()
 
-        self.addTab(self.segmentation_module_left, "Left")
         self.addTab(self.segmentation_module_right, "Right")
+        self.addTab(self.segmentation_module_left, "Left")
 
 
     def loadPatient(self, patient_dict):
-        self.segmentation_module_left.loadVolumeSeg(
-            patient_dict['volume_left'], patient_dict['seg_left'])
         self.segmentation_module_right.loadVolumeSeg(
             patient_dict['volume_right'], patient_dict['seg_right'])
+        self.segmentation_module_left.loadVolumeSeg(
+            patient_dict['volume_left'], patient_dict['seg_left'])
 
 
     def close(self):
-        self.segmentation_module_left.close()
         self.segmentation_module_right.close()
+        self.segmentation_module_left.close()
