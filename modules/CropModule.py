@@ -1,3 +1,4 @@
+import vtk
 from PyQt5.QtCore import Qt
 from PyQt5.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QSlider, QPushButton
 from vmtk import vmtkscripts
@@ -11,6 +12,20 @@ class CropModule(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.image = None
+        self.crop_image_left = None
+        self.crop_image_right = None
+        
+        self.box_left_source = vtk.vtkCubeSource()
+        self.box_left_mapper = vtk.vtkPolyDataMapper()
+        self.box_left_mapper.SetInputConnection(self.box_left_source.GetOutputPort())
+        self.box_left_actor = vtk.vtkActor()
+        self.box_left_actor.SetMapper(self.box_left_mapper)
+
+        self.box_right_source = vtk.vtkCubeSource()
+        self.box_right_mapper = vtk.vtkPolyDataMapper()
+        self.box_right_mapper.SetInputConnection(self.box_right_source.GetOutputPort())
+        self.box_right_actor = vtk.vtkActor()
+        self.box_right_actor.SetMapper(self.box_right_mapper)
         
         self.slice_view = ImageSliceInteractor(self)
         self.volume_view = VolumeRenderingInteractor(self)
@@ -72,24 +87,56 @@ class CropModule(QWidget):
 
     def loadPatient(self, patient_dict):
         volume_file = patient_dict['volume_raw']
-        print("laoding", volume_file)
-        if volume_file:
-            reader = vmtkscripts.vmtkImageReader()
-            reader.InputFileName = volume_file
-            reader.Execute()
-            self.image = reader.Image
-            self.volume_view.setImage(self.image)
-            self.slice_view.setImage(self.image)
-            self.slice_view_slider.setRange(
-                self.slice_view.min_slice,
-                self.slice_view.max_slice
-            )
-            self.slice_view_slider.setSliderPosition(self.slice_view.slice)
-
-        else:
+        if not volume_file:
             self.image = None
             self.slice_view.reset()
             self.volume_view.reset()
+            return
+
+        # load raw volume
+        reader = vmtkscripts.vmtkImageReader()
+        reader.InputFileName = volume_file
+        reader.Execute()
+        self.image = reader.Image
+        self.volume_view.setImage(self.image)
+        self.slice_view.setImage(self.image)
+        self.slice_view_slider.setRange(
+            self.slice_view.min_slice,
+            self.slice_view.max_slice
+        )
+        self.slice_view_slider.setSliderPosition(self.slice_view.slice)
+
+        # load left volume
+        left_volume_file = patient_dict['volume_left']
+        if left_volume_file:
+            reader.InputFileName = left_volume_file
+            reader.Execute()
+            img = reader.Image
+            o_x, o_y, o_z = img.GetOrigin()
+            s_x, s_y, s_z = img.GetSpacing()
+            x, y, z = img.GetDimensions()
+            self.box_left_source.SetBounds(
+                        -o_x - s_x * x, -o_x,
+                        -o_y - s_y * y, -o_y,  
+                         o_z,  o_z + s_z * z
+                         )
+            self.volume_view.renderer.AddActor(self.box_left_actor)
+            self.volume_view.renderer.ResetCamera()
+        else:
+            self.volume_view.renderer.RemoveActor(self.box_left_actor)
+
+        # load right volume
+        # right_volume_file = patient_dict['volume_right']
+        # if right_volume_file:
+        #     reader.InputFileName = right_volume_file
+        #     reader.Execute()
+        #     img = reader.Image
+        #     self.box_right_source.SetBounds(img.GetExtent())
+        #     self.volume_view.renderer.AddActor(self.box_right_actor)
+        # else:
+        #     self.volume_view.renderer.RemoveActor(self.box_right_actor)
+
+
 
 
     def close(self):
