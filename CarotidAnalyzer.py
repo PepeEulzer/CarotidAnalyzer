@@ -117,7 +117,7 @@ class CarotidAnalyzer(QMainWindow, Ui_MainWindow):
             add_if_exists("centerlines_right", "_right_lumen_centerlines.vtp", True)
             self.patient_data.append(patient_dict)
 
-            entry_volume = ["CTA Volume", "", ""]
+            entry_volume = ["Crop Volume", "", ""]
             entry_volume[1] = SYM_YES if patient_dict["volume_left"] else SYM_NO
             entry_volume[2] = SYM_YES if patient_dict["volume_right"] else SYM_NO
 
