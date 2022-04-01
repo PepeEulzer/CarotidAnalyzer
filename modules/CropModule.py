@@ -98,10 +98,12 @@ class CropModule(QWidget):
 
     def setLeftVolume(self):
         print("Setting left volume...")
+        print("NOT IMPLEMENTED")
     
     
     def setRightVolume(self):
         print("Setting right volume...")
+        print("NOT IMPLEMENTED")
 
 
     def showEvent(self, event):
@@ -118,20 +120,51 @@ class CropModule(QWidget):
         self.volume_view.Disable()
         self.volume_view.EnableRenderOff()
         super(CropModule, self).hideEvent(event)
+
+
+    def __loadCropVolume(self, filename, box_source, box_actor, cut_actor):
+        if filename:
+            reader = vmtkscripts.vmtkImageReader()
+            reader.InputFileName = filename
+            reader.Execute()
+            img = reader.Image
+
+            # In the nrrd header, the origin x,y and spacing x,y are mirrored.
+            # Might be an artifact of the LPS coordinate system?
+            # => Box x,y axes need to be flipped.
+            ox, oy, oz = img.GetOrigin()
+            sx, sy, sz = img.GetSpacing()
+            x, y, z = img.GetDimensions()
+            box_source.SetBounds(
+                        -ox - sx * x, -ox,
+                        -oy - sy * y, -oy,  
+                         oz,  oz + sz * z
+                         )
+            self.volume_view.renderer.AddActor(box_actor)
+            self.volume_view.renderer.AddActor(cut_actor)
+            self.volume_view.renderer.ResetCamera()
+            self.slice_view.renderer.AddActor(cut_actor)
+        else:
+            self.volume_view.renderer.RemoveActor(box_actor)
+            self.volume_view.renderer.RemoveActor(cut_actor)
+            self.slice_view.renderer.RemoveActor(cut_actor)
+
     
+    def resetViews(self):
+        self.volume_view.renderer.RemoveActor(self.box_left_actor)
+        self.volume_view.renderer.RemoveActor(self.cut_left_actor)
+        self.slice_view.renderer.RemoveActor(self.cut_left_actor)
+        self.volume_view.renderer.RemoveActor(self.box_right_actor)
+        self.volume_view.renderer.RemoveActor(self.cut_right_actor)
+        self.slice_view.renderer.RemoveActor(self.cut_right_actor)
+        self.slice_view.reset()
+        self.volume_view.reset()
 
     def loadPatient(self, patient_dict):
         volume_file = patient_dict['volume_raw']
         if not volume_file:
             self.image = None
-            self.volume_view.renderer.RemoveActor(self.box_left_actor)
-            self.volume_view.renderer.RemoveActor(self.cut_left_actor)
-            self.slice_view.renderer.RemoveActor(self.cut_left_actor)
-            self.volume_view.renderer.RemoveActor(self.box_right_actor)
-            self.volume_view.renderer.RemoveActor(self.cut_right_actor)
-            self.slice_view.renderer.RemoveActor(self.cut_right_actor)
-            self.slice_view.reset()
-            self.volume_view.reset()
+            self.resetViews()
             return
 
         # load raw volume
@@ -139,8 +172,13 @@ class CropModule(QWidget):
         reader.InputFileName = volume_file
         reader.Execute()
         self.image = reader.Image
+
+        # In the nrrd header, the origin x,y are mirrored.
+        # => Flip x,y origin positions.
         ox, oy, oz = self.image.GetOrigin()
         self.image.SetOrigin(-ox, -oy, oz)
+
+        # set the volume image in both views
         self.volume_view.setImage(self.image)
         self.slice_view.setImage(self.image)
         self.slice_view_slider.setRange(
@@ -149,51 +187,11 @@ class CropModule(QWidget):
         )
         self.slice_view_slider.setSliderPosition(self.slice_view.slice)
 
-        # load left volume
-        left_volume_file = patient_dict['volume_left']
-        if left_volume_file:
-            reader.InputFileName = left_volume_file
-            reader.Execute()
-            img = reader.Image
-            ox, oy, oz = img.GetOrigin()
-            sx, sy, sz = img.GetSpacing()
-            x, y, z = img.GetDimensions()
-            self.box_left_source.SetBounds(
-                        -ox - sx * x, -ox,
-                        -oy - sy * y, -oy,  
-                         oz,  oz + sz * z
-                         )
-            self.volume_view.renderer.AddActor(self.box_left_actor)
-            self.volume_view.renderer.AddActor(self.cut_left_actor)
-            self.volume_view.renderer.ResetCamera()
-            self.slice_view.renderer.AddActor(self.cut_left_actor)
-        else:
-            self.volume_view.renderer.RemoveActor(self.box_left_actor)
-            self.volume_view.renderer.RemoveActor(self.cut_left_actor)
-            self.slice_view.renderer.RemoveActor(self.cut_left_actor)
-
-        # load right volume
+        # load crop volume boxes if they exist
+        left_volume_file  = patient_dict['volume_left']
         right_volume_file = patient_dict['volume_right']
-        if right_volume_file:
-            reader.InputFileName = right_volume_file
-            reader.Execute()
-            img = reader.Image
-            ox, oy, oz = img.GetOrigin()
-            sx, sy, sz = img.GetSpacing()
-            x, y, z = img.GetDimensions()
-            self.box_right_source.SetBounds(
-                        -ox - sx * x, -ox,
-                        -oy - sy * y, -oy,  
-                         oz,  oz + sz * z
-                         )
-            self.volume_view.renderer.AddActor(self.box_right_actor)
-            self.volume_view.renderer.AddActor(self.cut_right_actor)
-            self.volume_view.renderer.ResetCamera()
-            self.slice_view.renderer.AddActor(self.cut_right_actor)
-        else:
-            self.volume_view.renderer.RemoveActor(self.box_right_actor)
-            self.volume_view.renderer.RemoveActor(self.cut_right_actor)
-            self.slice_view.renderer.RemoveActor(self.cut_right_actor)
+        self.__loadCropVolume(left_volume_file, self.box_left_source, self.box_left_actor, self.cut_left_actor)
+        self.__loadCropVolume(right_volume_file, self.box_right_source, self.box_right_actor, self.cut_right_actor)
 
 
     def close(self):

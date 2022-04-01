@@ -74,6 +74,7 @@ class CarotidAnalyzer(QMainWindow, Ui_MainWindow):
 
     def loadNewDICOM(self):
         print("Call file dialog. Load a DICOM dataset")
+        print("NOT IMPLEMENTED")
 
     
     def setWorkingDir(self, dir):
