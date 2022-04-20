@@ -18,6 +18,26 @@ Install using Anaconda
 conda create -n CarotidAnalyzer -c vmtk python=3.6 pyqt numpy itk vtk vmtk
 ```
 
+**Install CNN inference dependencies**
+For creating segmentation mask predictions with the CNN also install the following:
+
+Pytorch CUDA (with CUDA-enabled NVIDIA card)
+```
+conda activate CarotidAnalyzer
+conda install pytorch torchvision torchaudio cudatoolkit=11.3 -c pytorch
+```
+
+**Or** Pytorch CPU
+```
+conda install pytorch torchvision torchaudio cpuonly -c pytorch
+```
+
+Monai, skimage, pynrrd
+```
+pip install monai
+conda install skimage pynrrd -c conda-forge
+```
+
 
 
 #### GUI Dev with Qt Designer

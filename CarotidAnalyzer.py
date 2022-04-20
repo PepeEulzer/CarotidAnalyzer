@@ -60,6 +60,8 @@ class CarotidAnalyzer(QMainWindow, Ui_MainWindow):
         self.centerline_module.centerline_module_left.data_modified.connect(self.changesMade)
         self.centerline_module.centerline_module_right.data_modified.connect(self.changesMade)
         self.centerline_module.new_centerlines.connect(self.newCenterlines)
+        self.segmentation_module.segmentation_module_left.data_modified.connect(self.changesMade)
+        self.segmentation_module.segmentation_module_right.data_modified.connect(self.changesMade)
 
         # restore state properties
         settings = QSettings()
@@ -109,7 +111,9 @@ class CarotidAnalyzer(QMainWindow, Ui_MainWindow):
             add_if_exists("volume_left", "_left.nrrd")
             add_if_exists("volume_right", "_right.nrrd")
             add_if_exists("seg_left", "_left.seg.nrrd")
+            add_if_exists("seg_left_pred", "_left_pred.seg.nrrd")
             add_if_exists("seg_right", "_right.seg.nrrd")
+            add_if_exists("seg_right_pred", "_right_pred.seg.nrrd")
             add_if_exists("lumen_model_left", "_left_lumen.stl", True)
             add_if_exists("lumen_model_right", "_right_lumen.stl", True)
             add_if_exists("plaque_model_left", "_left_plaque.stl", True)

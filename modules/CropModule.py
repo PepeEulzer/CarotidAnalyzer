@@ -2,8 +2,8 @@ import vtk
 from PyQt5.QtCore import Qt
 from PyQt5.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QSlider, QPushButton
 from vmtk import vmtkscripts
-from defaults import COLOR_LEFT, COLOR_LEFT_HEX, COLOR_RIGHT, COLOR_RIGHT_HEX
 
+from defaults import COLOR_LEFT, COLOR_LEFT_HEX, COLOR_RIGHT, COLOR_RIGHT_HEX
 from modules.Interactors import ImageSliceInteractor, VolumeRenderingInteractor
 
 class CropModule(QWidget):

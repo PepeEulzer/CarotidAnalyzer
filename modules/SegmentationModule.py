@@ -1,8 +1,8 @@
 import vtk
-from PyQt5.QtCore import Qt
+from PyQt5.QtCore import Qt, pyqtSignal
 from PyQt5.QtWidgets import  (
     QWidget, QVBoxLayout, QHBoxLayout, QSlider, QTabWidget,
-    QPushButton
+    QPushButton, QMessageBox
 )
 
 from modules.Interactors import ImageSliceInteractor, IsosurfaceInteractor
@@ -12,10 +12,15 @@ class SegmentationModuleTab(QWidget):
     """
     Tab view of a right OR left side carotid for segmentation.
     """
+    data_modified = pyqtSignal()
     def __init__(self, parent=None):
         super().__init__(parent)
+
+        # state
+        self.pred_file = False
         
         # on-screen objects
+        self.CNN_button = QPushButton("New Segmentation: Initialize with CNN")
         self.slice_view = ImageSliceInteractor(self)
         self.slice_view.renderer.GetActiveCamera().SetViewUp(0, 1, 0)
         self.slice_view_slider = QSlider(Qt.Horizontal)
@@ -24,6 +29,7 @@ class SegmentationModuleTab(QWidget):
 
         # add everything to a layout
         self.slice_view_layout = QVBoxLayout()
+        self.slice_view_layout.addWidget(self.CNN_button)
         self.slice_view_layout.addWidget(self.slice_view_slider)
         self.slice_view_layout.addWidget(self.slice_view)
 
@@ -38,6 +44,7 @@ class SegmentationModuleTab(QWidget):
             self.model_view.smoother_plaque.GetOutputPort(), COLOR_PLAQUE_DARK, COLOR_PLAQUE)
 
         # connect signals/slots
+        self.CNN_button.pressed.connect(self.generateCNNSeg)
         self.slice_view.slice_changed[int].connect(self.sliceChanged)
         self.slice_view_slider.valueChanged[int].connect(self.slice_view.setSlice)
 
@@ -84,7 +91,8 @@ class SegmentationModuleTab(QWidget):
         super(SegmentationModuleTab, self).hideEvent(event)
     
 
-    def loadVolumeSeg(self, volume_file, seg_file):
+    def loadVolumeSeg(self, volume_file, seg_file, pred_file):
+        self.pred_file = pred_file
         if volume_file:
             self.slice_view.loadNrrd(volume_file, False)
             self.slice_view_slider.setRange(
@@ -109,6 +117,26 @@ class SegmentationModuleTab(QWidget):
             self.slice_view.renderer.RemoveActor(self.plaque_outline_actor2D)
 
 
+    def generateCNNSeg(self):
+        dlg = QMessageBox(self)
+        dlg.setWindowTitle("New Segmentation: Initialize with CNN")
+        if not self.pred_file:
+            dlg.setText("Error: Could not generate segmentation prediction.")
+            dlg.setStandardButtons(QMessageBox.Cancel)
+            button = dlg.exec()
+        else:
+            dlg.setText("<p align='center'>Generate a segmentation prediction?<br>WARNING: Fully overwrites current mask!</p>")
+            dlg.setStandardButtons(QMessageBox.Ok | QMessageBox.Cancel)
+            button = dlg.exec()
+            if button == QMessageBox.Ok:
+                self.model_view.loadNrrd(self.pred_file)
+                self.model_view.renderer.AddActor(self.lumen_outline_actor3D)
+                self.slice_view.renderer.AddActor(self.lumen_outline_actor2D)
+                self.model_view.renderer.AddActor(self.plaque_outline_actor3D)
+                self.slice_view.renderer.AddActor(self.plaque_outline_actor2D)
+                self.data_modified.emit()
+
+
     def close(self):
         self.slice_view.Finalize()
         self.model_view.Finalize()
@@ -121,6 +149,7 @@ class SegmentationModule(QTabWidget):
     """
     def __init__(self, parent=None):
         super().__init__(parent)
+        self.patient_dict = None
 
         self.segmentation_module_left = SegmentationModuleTab()
         self.segmentation_module_right = SegmentationModuleTab()
@@ -130,10 +159,20 @@ class SegmentationModule(QTabWidget):
 
 
     def loadPatient(self, patient_dict):
+        self.patient_dict = patient_dict
         self.segmentation_module_right.loadVolumeSeg(
-            patient_dict['volume_right'], patient_dict['seg_right'])
+            patient_dict['volume_right'], patient_dict['seg_right'], patient_dict['seg_right_pred'])
         self.segmentation_module_left.loadVolumeSeg(
-            patient_dict['volume_left'], patient_dict['seg_left'])
+            patient_dict['volume_left'], patient_dict['seg_left'], patient_dict['seg_left_pred'])
+
+
+    def discard(self):
+        self.loadPatient(self.patient_dict)
+
+
+    def save(self):
+        print("Save method called on Segmentation Module!")
+        print("Dummy")
 
 
     def close(self):
