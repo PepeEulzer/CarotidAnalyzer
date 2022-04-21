@@ -1,4 +1,9 @@
+import os
+from collections import OrderedDict
+
+import nrrd
 import vtk
+from vtk.util.numpy_support import vtk_to_numpy
 from PyQt5.QtCore import Qt, pyqtSignal
 from PyQt5.QtWidgets import  (
     QWidget, QVBoxLayout, QHBoxLayout, QSlider, QTabWidget,
@@ -17,6 +22,7 @@ class SegmentationModuleTab(QWidget):
         super().__init__(parent)
 
         # state
+        self.volume_file = False
         self.pred_file = False
         
         # on-screen objects
@@ -92,6 +98,7 @@ class SegmentationModuleTab(QWidget):
     
 
     def loadVolumeSeg(self, volume_file, seg_file, pred_file):
+        self.volume_file = volume_file
         self.pred_file = pred_file
         if volume_file:
             self.slice_view.loadNrrd(volume_file, False)
@@ -137,6 +144,53 @@ class SegmentationModuleTab(QWidget):
                 self.data_modified.emit()
 
 
+    def saveChanges(self, path_seg, path_lumen, path_plaque):
+        # catch if one side has something to save, other side not
+        x_dim, y_dim, z_dim = self.model_view.label_map.GetDimensions()
+        if x_dim == 0 or y_dim == 0 or z_dim == 0:
+            return
+
+        # save segmentation nrrd
+        header_img = nrrd.read_header(self.volume_file)
+        header = OrderedDict()
+        header['type'] = 'unsigned char'
+        header['dimension'] = 3
+        header['space'] = 'left-posterior-superior'
+        header['sizes'] = '120 144 248' # fixed model size
+        header['space directions'] = header_img['space directions']
+        header['kinds'] = ['domain', 'domain', 'domain']
+        header['endian'] = 'little'
+        header['encoding'] = 'gzip'
+        header['space origin'] = header_img['space origin']
+        header['Segment0_ID'] = 'Segment_1'
+        header['Segment0_Name'] = 'plaque'
+        header['Segment0_Color'] = str(241/255) + ' ' + str(214/255) + ' ' + str(145/255)
+        header['Segment0_LabelValue'] = 1
+        header['Segment0_Layer'] = 0
+        header['Segment0_Extent'] = '0 119 0 143 0 247'
+        header['Segment1_ID'] = 'Segment_2'
+        header['Segment1_Name'] = 'lumen'
+        header['Segment1_Color'] = str(216/255) + ' ' + str(101/255) + ' ' + str(79/255)
+        header['Segment1_LabelValue'] = 2
+        header['Segment1_Layer'] = 0
+        header['Segment1_Extent'] = '0 119 0 143 0 247'
+        segmentation = vtk_to_numpy(self.model_view.label_map.GetPointData().GetScalars())
+        segmentation = segmentation.reshape(x_dim, y_dim, z_dim, order='F')
+        nrrd.write(path_seg, segmentation, header)
+
+        # save models
+        writer = vtk.vtkSTLWriter()
+        lumen = self.model_view.smoother_lumen.GetOutput()
+        if lumen.GetNumberOfPoints() > 0:
+            writer.SetFileName(path_lumen)
+            writer.SetInputData(lumen)
+            writer.Write()
+        plaque = self.model_view.smoother_plaque.GetOutput()
+        if plaque.GetNumberOfPoints() > 0:
+            writer.SetFileName(path_plaque)
+            writer.SetInputData(plaque)
+            writer.Write()
+
     def close(self):
         self.slice_view.Finalize()
         self.model_view.Finalize()
@@ -147,6 +201,8 @@ class SegmentationModule(QTabWidget):
     """
     Module for segmenting the left/right carotid.
     """
+    new_segmentation = pyqtSignal()
+    new_models = pyqtSignal()
     def __init__(self, parent=None):
         super().__init__(parent)
         self.patient_dict = None
@@ -171,8 +227,21 @@ class SegmentationModule(QTabWidget):
 
 
     def save(self):
-        print("Save method called on Segmentation Module!")
-        print("Dummy")
+        patient_ID = self.patient_dict['patient_ID']
+        base_path  = self.patient_dict['base_path']
+
+        path_seg = os.path.join(base_path, patient_ID + "_right.seg.nrrd")
+        path_lumen = os.path.join(base_path, "models", patient_ID + "_right_lumen.stl")
+        path_plaque = os.path.join(base_path, "models", patient_ID + "_right_plaque.stl")
+        self.segmentation_module_right.saveChanges(path_seg, path_lumen, path_plaque)
+        
+        path_seg = os.path.join(base_path, patient_ID + "_left.seg.nrrd")
+        path_lumen = os.path.join(base_path, "models", patient_ID + "_left_lumen.stl")
+        path_plaque = os.path.join(base_path, "models", patient_ID + "_left_plaque.stl")
+        self.segmentation_module_left.saveChanges(path_seg, path_lumen, path_plaque)
+
+        self.new_segmentation.emit()
+        self.new_models.emit()
 
 
     def close(self):

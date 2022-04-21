@@ -62,6 +62,9 @@ class CarotidAnalyzer(QMainWindow, Ui_MainWindow):
         self.centerline_module.new_centerlines.connect(self.newCenterlines)
         self.segmentation_module.segmentation_module_left.data_modified.connect(self.changesMade)
         self.segmentation_module.segmentation_module_right.data_modified.connect(self.changesMade)
+        self.segmentation_module.new_segmentation.connect(self.newSegmentation)
+        self.segmentation_module.new_models.connect(self.newModels)
+
 
         # restore state properties
         settings = QSettings()
@@ -246,6 +249,46 @@ class CarotidAnalyzer(QMainWindow, Ui_MainWindow):
         self.action_discard_changes.setEnabled(False)
         self.action_save_and_propagate.setEnabled(False)
         self.unsaved_changes = False
+
+
+    def newSegmentation(self):
+        patient_ID = self.active_patient_dict['patient_ID']
+        base_path  = self.active_patient_dict['base_path']
+        path_left = os.path.join(base_path, patient_ID + "_left.seg.nrrd")
+        path_right = os.path.join(base_path, patient_ID + "_right.seg.nrrd")
+        seg_item = self.active_patient_tree_widget_item.child(1)
+        if os.path.exists(path_left):
+            self.active_patient_dict['seg_left'] = path_left
+            seg_item.setText(1, SYM_YES)
+        if os.path.exists(path_right):
+            self.active_patient_dict['seg_right'] = path_right
+            seg_item.setText(2, SYM_YES)
+
+    
+    def newModels(self):
+        patient_ID = self.active_patient_dict['patient_ID']
+        base_path  = self.active_patient_dict['base_path']
+        path_left_lumen = os.path.join(base_path, "models", patient_ID + "_left_lumen.stl")
+        path_left_plaque = os.path.join(base_path, "models", patient_ID + "_left_plaque.stl")
+        path_right_lumen = os.path.join(base_path, "models", patient_ID + "_right_lumen.stl")
+        path_right_plaque = os.path.join(base_path, "models", patient_ID + "_right_plaque.stl")
+        lumen_item = self.active_patient_tree_widget_item.child(2)
+        plaque_item = self.active_patient_tree_widget_item.child(3)
+        if os.path.exists(path_left_lumen):
+            self.active_patient_dict['lumen_model_left'] = path_left_lumen
+            lumen_item.setText(1, SYM_YES)
+        if os.path.exists(path_left_plaque):
+            self.active_patient_dict['plaque_model_left'] = path_left_plaque
+            plaque_item.setText(1, SYM_YES)
+        if os.path.exists(path_right_lumen):
+            self.active_patient_dict['lumen_model_right'] = path_right_lumen
+            lumen_item.setText(2, SYM_YES)
+        if os.path.exists(path_right_plaque):
+            self.active_patient_dict['plaque_model_right'] = path_right_plaque
+            plaque_item.setText(2, SYM_YES)
+
+        # propagate
+        self.centerline_module.loadPatient(self.active_patient_dict)
 
     
     def newCenterlines(self):
