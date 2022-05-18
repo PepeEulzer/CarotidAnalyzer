@@ -1,5 +1,6 @@
 import os
 from collections import OrderedDict
+from re import I
 
 import nrrd
 import vtk
@@ -7,7 +8,7 @@ from vtk.util.numpy_support import vtk_to_numpy
 from PyQt5.QtCore import Qt, pyqtSignal
 from PyQt5.QtWidgets import  (
     QWidget, QVBoxLayout, QHBoxLayout, QSlider, QTabWidget,
-    QPushButton, QMessageBox
+    QPushButton, QMessageBox, QGridLayout
 )
 
 from modules.Interactors import ImageSliceInteractor, IsosurfaceInteractor
@@ -24,9 +25,24 @@ class SegmentationModuleTab(QWidget):
         # state
         self.volume_file = False
         self.pred_file = False
+        self.editing_active = False
+        self.brush_size = 0
         
         # on-screen objects
         self.CNN_button = QPushButton("New Segmentation: Initialize with CNN")
+        self.edit_button = QPushButton("Edit Segmentation")  # TO-DO: enable=false if no data loaded 
+        self.brush_button = QPushButton("Brush") 
+        self.eraser_button = QPushButton("Eraser")
+        self.stop_editing_button = QPushButton("Stop Editing")
+        self.lumen_button = QPushButton("Lumen")
+        self.plaque_button = QPushButton("Plaque")
+        self.brush_size_slider = QSlider(Qt.Horizontal)  # label?/somehow display brush size around cursor (maybe similar to 3D Slicer)
+        self.brush_button.setVisible(False)
+        self.eraser_button.setVisible(False)
+        self.stop_editing_button.setVisible(False)
+        self.lumen_button.setVisible(False)
+        self.plaque_button.setVisible(False)
+        self.brush_size_slider.setVisible(False)
         self.slice_view = ImageSliceInteractor(self)
         self.slice_view.renderer.GetActiveCamera().SetViewUp(0, 1, 0)
         self.slice_view_slider = QSlider(Qt.Horizontal)
@@ -36,12 +52,24 @@ class SegmentationModuleTab(QWidget):
         # add everything to a layout
         self.slice_view_layout = QVBoxLayout()
         self.slice_view_layout.addWidget(self.CNN_button)
+        self.slice_view_layout.addWidget(self.edit_button)
         self.slice_view_layout.addWidget(self.slice_view_slider)
         self.slice_view_layout.addWidget(self.slice_view)
 
+        #self.edit_buttons_layout = QVBoxLayout()
+        self.edit_buttons_layout = QGridLayout()
+        self.edit_buttons_layout.addWidget(self.brush_button, 0,0,1,2) 
+        self.edit_buttons_layout.addWidget(self.lumen_button, 1,0)
+        self.edit_buttons_layout.addWidget(self.plaque_button, 1,1)
+        self.edit_buttons_layout.addWidget(self.brush_size_slider, 2,0,1,2)
+        self.edit_buttons_layout.addWidget(self.eraser_button, 3,0,1,2)
+        self.edit_buttons_layout.addWidget(self.stop_editing_button, 4,0,1,2)
+
         self.top_layout = QHBoxLayout(self)
         self.top_layout.addLayout(self.slice_view_layout)
+        self.top_layout.addLayout(self.edit_buttons_layout)
         self.top_layout.addWidget(self.model_view)
+        
 
         # shared vtk objects
         self.lumen_outline_actor3D, self.lumen_outline_actor2D = self.__createOutlineActors(
@@ -53,6 +81,12 @@ class SegmentationModuleTab(QWidget):
         self.CNN_button.pressed.connect(self.generateCNNSeg)
         self.slice_view.slice_changed[int].connect(self.sliceChanged)
         self.slice_view_slider.valueChanged[int].connect(self.slice_view.setSlice)
+        self.slice_view_slider.valueChanged[int].connect(self.setSliceEditor)
+        self.edit_button.pressed.connect(self.activateEditing)
+        self.brush_button.pressed.connect(self.drawMode)  # put elsewhere? 
+        self.eraser_button.pressed.connect(self.erase)
+        self.brush_size_slider.valueChanged[int].connect(self.brushSizeChanged)
+        self.stop_editing_button.pressed.connect(self.inactivateEditing)
 
         # initialize VTK
         self.slice_view.Initialize()
@@ -94,7 +128,7 @@ class SegmentationModuleTab(QWidget):
     def hideEvent(self, event):
         self.slice_view.Disable()
         self.slice_view.EnableRenderOff()
-        super(SegmentationModuleTab, self).hideEvent(event)
+        super(SegmentationModuleTab, self).hideEvent(event)  
     
 
     def loadVolumeSeg(self, volume_file, seg_file, pred_file):
@@ -143,6 +177,132 @@ class SegmentationModuleTab(QWidget):
                 self.slice_view.renderer.AddActor(self.plaque_outline_actor2D)
                 self.data_modified.emit()
 
+
+    def activateEditing(self):
+        ### catch: no patient data loaded/hide button as long as no patient data loaded
+        
+        self.editing_active = True 
+        self.brush_button.setVisible(True)
+        self.eraser_button.setVisible(True)
+        self.stop_editing_button.setVisible(True)
+        self.edit_button.setEnabled(False)
+
+        # define lookup-table for label map
+        self.lookuptable = vtk.vtkLookupTable()
+        self.lookuptable.SetNumberOfTableValues(3)
+        self.lookuptable.SetTableValue(0, 0, 0, 0, 0)  # set color of backround (idx 0) to black with transparency 0
+        alpha = (0.75,)
+        self.lumen_rgba = COLOR_LUMEN + alpha
+        self.plaque_rgba = COLOR_PLAQUE + alpha  # plaque also red ?  -  color and transperancy changes when clicked left and mouse wheel (only when in editing mode, does not work when clicked on brush)
+        self.lookuptable.SetTableValue(1, self.plaque_rgba)
+        self.lookuptable.SetTableValue(2, self.lumen_rgba)
+        self.lookuptable.Build()  
+
+        self.masks_color_mapped = vtk.vtkImageMapToColors()  
+        self.masks_color_mapped.SetInputData(self.model_view.label_map)  
+        self.masks_color_mapped.SetLookupTable(self.lookuptable)
+        
+        self.mask_slice_mapper = vtk.vtkOpenGLImageSliceMapper()  
+        self.mask_slice_mapper.SetInputConnection(self.masks_color_mapped.GetOutputPort())
+        self.mask_slice_mapper.SliceAtFocalPointOff() 
+        self.mask_slice_mapper.SetNumberOfThreads(1)
+        self.mask_slice_mapper.SetSliceNumber(self.slice_view.slice)
+        
+        self.mask_slice_actor = vtk.vtkImageActor()
+        self.mask_slice_actor.SetMapper(self.mask_slice_mapper)
+        self.mask_slice_actor.SetPosition(self.slice_view.image_actor.GetPosition())
+        
+        # define canvas to draw changes of segmentation on 
+        self.canvas = self.setUpCanvas()
+        self.canvas_actor = vtk.vtkImageActor()
+        self.canvas_actor.GetMapper().SetInputConnection(self.canvas.GetOutputPort())
+        img_pos = self.slice_view.image_actor.GetPosition()
+        self.canvas_actor.SetPosition(img_pos)  
+
+        self.slice_view.renderer.RemoveActor(self.lumen_outline_actor2D)
+        self.slice_view.renderer.RemoveActor(self.plaque_outline_actor2D)
+        self.slice_view.renderer.AddActor(self.mask_slice_actor)
+        self.slice_view.renderer.AddActor(self.canvas_actor)
+        ## is canvas displayed at right position (on top of image slice -> SetPosition of canvas actor)?
+        self.slice_view.GetRenderWindow().Render()
+        self.data_modified.emit() 
+      
+        
+    def inactivateEditing(self):
+        # show message, that changes will be lost 
+        self.editing_active = False
+        self.brush_button.setVisible(False)
+        self.eraser_button.setVisible(False)
+        self.stop_editing_button.setVisible(False)
+        self.lumen_button.setVisible(False)
+        self.plaque_button.setVisible(False)
+        self.brush_size_slider.setVisible(False)
+        self.edit_button.setEnabled(True)
+        self.slice_view.renderer.AddActor(self.lumen_outline_actor2D)
+        self.slice_view.renderer.AddActor(self.plaque_outline_actor2D)
+        self.slice_view.renderer.RemoveActor(self.mask_slice_actor)
+        self.slice_view.renderer.RemoveActor(self.canvas_actor)
+        self.slice_view.GetRenderWindow().Render()
+    
+    def setUpCanvas(self):
+        # if in activateEditing -> crash 
+        colors = vtk.vtkNamedColors()
+        canvas = vtk.vtkImageCanvasSource2D()
+        lm_extent = self.model_view.label_map.GetExtent()
+        canvas.SetExtent(lm_extent[0], lm_extent[1], lm_extent[2], lm_extent[3], self.slice_view.slice, self.slice_view.slice)  # instead of slice 0,0
+        canvas.SetDrawColor(colors.GetColor4ub('DarkCyan'))
+        canvas.FillTriangle(10,10,25,10,25,25)  # test if canvas visible, no triangle there 
+        canvas.Update()
+        return canvas
+
+    ###############################################
+    def setSliceEditor(self):
+        # connect mask slices to current image slice
+        # canvas here? 
+        if not self.editing_active:
+            return   
+        self.mask_slice_mapper.SetSliceNumber(self.slice_view.slice)
+        #self.canvas = self.setUpCanvas()
+        self.slice_view.GetRenderWindow().Render()
+
+
+    def brushSizeChanged(self, brush_size):
+        # set slider position?
+        self.brush_size = brush_size  # connect to draw
+
+    # possible to hand over color rather than using two seperate methods?
+    def setColorLumen(self):
+        self.canvas.SetDrawColor(self.lumen_rgba)
+    def setColorPlaque(self):
+        self.canvas.SetDrawColor(self.plaque_rgba)
+
+    def drawMode(self):  # merge with draw? (put observer in ActivateEditing  and only use draw)
+        self.slice_view.interactor_style.AddObserver("LeftButtonPressEvent", self.draw)  
+        self.lumen_button.setVisible(True)  # set false if exiting drawing/enable only if "draw" clicked 
+        self.plaque_button.setVisible(True)
+        self.brush_size_slider.setVisible(True)
+        self.lumen_button.pressed.connect(self.setColorLumen)
+        self.plaque_button.pressed.connect(self.setColorPlaque)
+
+    def draw(self, object, event):  
+        # get position in image where clicked on -> draw via canvas 
+        # what happens if LeftButton hold down? new position continously or is oly position given on moment where pressed down? 
+        # maybe work with CursorChangedEvent? - get new position when cursor moved, under condition that left button pressed/LeftButtonReleaseEvent -> when observer for leftbuttonpressevent triggered new observer for cursorpositionchanged
+        # mouse position instead of event position?
+        x,y = self.slice_view.GetEventPosition()  
+        picker = vtk.vtkCellPicker()  # other picker?
+        picker.Pick(x,y,self.slice_view.slice,self.slice_view.renderer)  
+        self.lastImgPoint = picker.GetPointIJK()
+        
+        # nothing drawn on the image but position printed in prompt 
+        self.canvas.FillPixel(self.lastImgPoint[0], self.lastImgPoint[1])  # instead of changing pixelcolor sth else?/compute area(get pixel values around picked point) and fill all of them
+        # print("Click Position", self.lastImgPoint) # worldPoint)
+
+        self.data_modified.emit()
+        #self.slice_view.GetRenderWindow.Render()
+    
+    def erase(self):
+        return 
 
     def saveChanges(self, path_seg, path_lumen, path_plaque):
         # catch if one side has something to save, other side not
