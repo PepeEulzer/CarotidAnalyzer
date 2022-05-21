@@ -37,6 +37,10 @@ class SegmentationModuleTab(QWidget):
         self.lumen_button = QPushButton("Lumen")
         self.plaque_button = QPushButton("Plaque")
         self.brush_size_slider = QSlider(Qt.Horizontal)  # label?/somehow display brush size around cursor (maybe similar to 3D Slicer)
+        self.brush_size_slider.setMinimum(0)
+        self.brush_size_slider.setMaximum(10)
+        self.brush_size_slider.setSingleStep(1)
+        self.brush_size_slider.setValue(0)
         self.brush_button.setVisible(False)
         self.eraser_button.setVisible(False)
         self.stop_editing_button.setVisible(False)
@@ -255,10 +259,9 @@ class SegmentationModuleTab(QWidget):
         canvas.Update()
         return canvas
 
-    ###############################################
+    
     def setSliceEditor(self):
         # connect mask slices to current image slice
-        # canvas here? 
         if not self.editing_active:
             return   
         self.mask_slice_mapper.SetSliceNumber(self.slice_view.slice)
@@ -267,8 +270,9 @@ class SegmentationModuleTab(QWidget):
 
 
     def brushSizeChanged(self, brush_size):
-        # set slider position?
+        # to-do: display current size
         self.brush_size = brush_size  # connect to draw
+        #print(self.brush_size)
 
     # possible to hand over color rather than using two seperate methods?
     def setColorLumen(self):
@@ -276,31 +280,50 @@ class SegmentationModuleTab(QWidget):
     def setColorPlaque(self):
         self.canvas.SetDrawColor(self.plaque_rgba)
 
+    # merge methods for drawing? 
     def drawMode(self):  # merge with draw? (put observer in ActivateEditing  and only use draw)
-        self.slice_view.interactor_style.AddObserver("LeftButtonPressEvent", self.draw)  
+        self.slice_view.interactor_style.AddObserver("LeftButtonPressEvent", self.draw)  # remove at some point?
         self.lumen_button.setVisible(True)  # set false if exiting drawing/enable only if "draw" clicked 
         self.plaque_button.setVisible(True)
         self.brush_size_slider.setVisible(True)
-        self.lumen_button.pressed.connect(self.setColorLumen)
+        self.lumen_button.pressed.connect(self.setColorLumen)  # to-do: show that selected if clicked
         self.plaque_button.pressed.connect(self.setColorPlaque)
+
+    def start_draw(self, obj, event):
+        self.draw(obj, event)  # draw first point at posttion clicked on 
+        # draw as long as left mouse button pressed down 
+        self.slice_view.interactor_style.AddObserver("MouseMoveEvent", self.draw)  
+        self.slice_view.interactor_style.AddObserver("LeftButtonReleaseEvent", self.end_draw)
 
     def draw(self, object, event):  
         # get position in image where clicked on -> draw via canvas 
-        # what happens if LeftButton hold down? new position continously or is oly position given on moment where pressed down? 
-        # maybe work with CursorChangedEvent? - get new position when cursor moved, under condition that left button pressed/LeftButtonReleaseEvent -> when observer for leftbuttonpressevent triggered new observer for cursorpositionchanged
         # mouse position instead of event position?
         x,y = self.slice_view.GetEventPosition()  
         picker = vtk.vtkCellPicker()  # other picker?
         picker.Pick(x,y,self.slice_view.slice,self.slice_view.renderer)  
-        self.lastImgPoint = picker.GetPointIJK()
+        imgPos = picker.GetPointIJK()
         
-        # nothing drawn on the image but position printed in prompt 
-        self.canvas.FillPixel(self.lastImgPoint[0], self.lastImgPoint[1])  # instead of changing pixelcolor sth else?/compute area(get pixel values around picked point) and fill all of them
+        # catch: not selected if lumen/plaque (set draw color?)
+
+        # nothing drawn on the image but position printed in prompt (if print not commented out)
+        ## draw point at picked position 
+        self.canvas.DrawPoint(imgPos[0],imgPos[1])
+        ## draw box at picked position 
+        #self.canvas.FillBox(imgPos[0],imgPos[0]+self.brush_size,imgPos[1],imgPos[1]+self.brush_size)  # (probably) does not draw on actual pixel position - better use drawpoint? any alternative method ?
+        ## draw circle around picked position 
+        #self.canvas.DrawCircle(imgPos[0], imgPos[1], self.brush_size)
+        ## and fill area around circle with color
+        #self.canvas.FillPixel(imgPos[0],imgPos[1])  # leads to Generic Warning: In ..\Imaging\Sources\vtkImageCanvasSource2D.cxx, line 1219 Fill: Cannot handle draw color same as fill color
+       
         # print("Click Position", self.lastImgPoint) # worldPoint)
 
-        self.data_modified.emit()
-        #self.slice_view.GetRenderWindow.Render()
+        #self.data_modified.emit()  
+        self.slice_view.GetRenderWindow().Render()
     
+    def end_draw(self, obj, event):
+        id = vtk.vtkCommand.MouseMoveEvent
+        self.slice_view.interactor_style.RemoveObservers(id)
+
     def erase(self):
         return 
 
