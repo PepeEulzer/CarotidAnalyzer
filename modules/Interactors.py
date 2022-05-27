@@ -84,6 +84,9 @@ class ImageSliceInteractor(QVTKRenderWindowInteractor):
         self.renderer.GetActiveCamera().SetClippingRange(10, 2000)
         self.GetRenderWindow().Render()
 
+        # return a pointer if needed
+        return image
+
     
     def setImage(self, image):
         self.image_mapper.SetInputData(image)

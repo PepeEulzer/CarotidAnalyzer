@@ -23,6 +23,7 @@ class SegmentationModuleTab(QWidget):
         super().__init__(parent)
 
         # state
+        self.image = None
         self.volume_file = False
         self.pred_file = False
         self.editing_active = False
@@ -139,14 +140,16 @@ class SegmentationModuleTab(QWidget):
         self.volume_file = volume_file
         self.pred_file = pred_file
         if volume_file:
-            self.slice_view.loadNrrd(volume_file, False)
+            self.image = self.slice_view.loadNrrd(volume_file, False)
             self.slice_view_slider.setRange(
                 self.slice_view.min_slice,
                 self.slice_view.max_slice
             )
             self.slice_view_slider.setSliderPosition(self.slice_view.slice)
+
         else:
             self.slice_view.reset()
+            self.image = None
         
         if seg_file:
             self.model_view.loadNrrd(seg_file)
@@ -194,6 +197,7 @@ class SegmentationModuleTab(QWidget):
         # define lookup-table for label map
         self.lookuptable =vtk.vtkLookupTable() # vtk.vtkWindowLevelLookupTable()
         self.lookuptable.SetNumberOfTableValues(3)
+        self.lookuptable.SetTableRange(0,2)
         self.lookuptable.SetTableValue(0, 0.0, 0.0, 0.0, 0.0)  # set color of backround (id 0) to black with transparency 0
         alpha = (0.75,)
         self.lumen_rgba = COLOR_LUMEN + alpha
@@ -219,6 +223,7 @@ class SegmentationModuleTab(QWidget):
         self.mask_slice_mapper.SetSliceNumber(self.slice_view.slice)
         
         self.mask_slice_actor = vtk.vtkImageActor()
+        self.mask_slice_actor.InterpolateOff()
         self.mask_slice_actor.SetMapper(self.mask_slice_mapper)
         self.mask_slice_actor.SetPosition(self.slice_view.image_actor.GetPosition())
         
@@ -249,6 +254,7 @@ class SegmentationModuleTab(QWidget):
 
         ################## trying to display it same as image 
         self.canvas_actor = vtk.vtkImageActor()  # ad actor below 
+        self.canvas_actor.InterpolateOff()
         self.canvas_actor.GetMapper().SetInputConnection(self.canvas.GetOutputPort())
         img_pos = self.slice_view.image_actor.GetPosition()
         self.canvas_actor.SetPosition(img_pos)  
