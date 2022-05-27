@@ -192,19 +192,25 @@ class SegmentationModuleTab(QWidget):
         self.edit_button.setEnabled(False)
 
         # define lookup-table for label map
-        self.lookuptable = vtk.vtkLookupTable()
+        self.lookuptable =vtk.vtkLookupTable() # vtk.vtkWindowLevelLookupTable()
         self.lookuptable.SetNumberOfTableValues(3)
-        self.lookuptable.SetTableValue(0, 0, 0, 0, 0)  # set color of backround (idx 0) to black with transparency 0
+        self.lookuptable.SetTableValue(0, 0.0, 0.0, 0.0, 0.0)  # set color of backround (id 0) to black with transparency 0
         alpha = (0.75,)
         self.lumen_rgba = COLOR_LUMEN + alpha
         self.plaque_rgba = COLOR_PLAQUE + alpha  # plaque also red ?  -  color and transperancy changes when clicked left and mouse wheel (only when in editing mode, does not work when clicked on brush)
         self.lookuptable.SetTableValue(1, self.plaque_rgba)
         self.lookuptable.SetTableValue(2, self.lumen_rgba)
-        self.lookuptable.Build()  
-
-        self.masks_color_mapped = vtk.vtkImageMapToColors()  
+        #self.lookuptable.GetIndexedColor(0, [0.0, 0.0, 0.0, 0.0])
+        #self.lookuptable.GetIndexedColor(1, list(self.plaque_rgba))
+        #self.lookuptable.GetIndexedColor(2, list(self.lumen_rgba))
+        self.lookuptable.Build() 
+        
+        self.masks_color_mapped = vtk.vtkImageMapToColors() 
+        self.masks_color_mapped.SetLookupTable(self.lookuptable) 
+        self.masks_color_mapped.PassAlphaToOutputOn()
         self.masks_color_mapped.SetInputData(self.model_view.label_map)  
-        self.masks_color_mapped.SetLookupTable(self.lookuptable)
+        #self.masks_color_mapped.SetColorModeToMapScalars()
+        
         
         self.mask_slice_mapper = vtk.vtkOpenGLImageSliceMapper()  
         self.mask_slice_mapper.SetInputConnection(self.masks_color_mapped.GetOutputPort())
@@ -218,7 +224,31 @@ class SegmentationModuleTab(QWidget):
         
         # define canvas to draw changes of segmentation on 
         self.canvas = self.setUpCanvas()
-        self.canvas_actor = vtk.vtkImageActor()
+        ################### using logowidget
+        #self.canvas_logo = vtk.vtkLogoRepresentation()
+        #self.canvas_logo.SetImage(self.canvas.GetOutput())
+        #self.canvas_logo.SetPosition(self.slice_view.image_actor.GetPosition()[0], self.slice_view.image_actor.GetPosition()[1])
+        #self.canvas_logo.SetPosition2(self.slice_view.image_actor.GetPosition2()[0],self.slice_view.image_actor.GetPosition2()[1])
+        #self.canvas_logo.GetImageProperty().SetOpacity(0.75)
+        #self.canvas_widget = vtk.vtkLogoWidget()
+        #self.canvas_widget.SetInteractor(self.slice_view)
+        #self.canvas_widget.SetRepresentation(self.canvas_logo)
+
+        ################## using blender 
+        #self.slice_view.renderer.RemoveActor(self.slice_view.image_actor)
+        #self.blender = vtk.vtkImageBlend()
+        #self.blender.SetOpacity(1, 0.75)
+        #self.blender.SetInputData(self.slice_view.image_actor.GetInput())
+        #self.blender.SetInputConnection(self.slice_view.image_mapper.GetOutputPort())  # what to take as input for the sliced medical data? 
+        #self.blender.SetInputConnection(self.canvas.GetOutputPort())
+        #self.blender.Update()
+
+        #self.blender_mapper = vtk.vtkDataSetMapper()
+        #self.blender_actor = vtk.vtkActor()
+        #self.blender_actor.SetMapper(self.blender_mapper)
+
+        ################## trying to display it same as image 
+        self.canvas_actor = vtk.vtkImageActor()  # ad actor below 
         self.canvas_actor.GetMapper().SetInputConnection(self.canvas.GetOutputPort())
         img_pos = self.slice_view.image_actor.GetPosition()
         self.canvas_actor.SetPosition(img_pos)  
@@ -226,9 +256,11 @@ class SegmentationModuleTab(QWidget):
         self.slice_view.renderer.RemoveActor(self.lumen_outline_actor2D)
         self.slice_view.renderer.RemoveActor(self.plaque_outline_actor2D)
         self.slice_view.renderer.AddActor(self.mask_slice_actor)
-        self.slice_view.renderer.AddActor(self.canvas_actor)
+        self.slice_view.renderer.AddActor(self.canvas_actor)  # actor depending on approach 
         ## is canvas displayed at right position (on top of image slice -> SetPosition of canvas actor)?
         self.slice_view.GetRenderWindow().Render()
+        #self.canvas_widget.On()  
+        #self.slice_view.GetRenderWindow().Render()
         self.data_modified.emit() 
       
         
@@ -254,8 +286,9 @@ class SegmentationModuleTab(QWidget):
         canvas = vtk.vtkImageCanvasSource2D()
         lm_extent = self.model_view.label_map.GetExtent()
         canvas.SetExtent(lm_extent[0], lm_extent[1], lm_extent[2], lm_extent[3], self.slice_view.slice, self.slice_view.slice)  # instead of slice 0,0
+        canvas.SetNumberOfScalarComponents(3)  # what exacly does this do?! doc: Set the number of scalar components; in vtkImageData doc: Set/Get the number of scalar components for points. As with the SetScalarType method this is setting pipeline info.
         canvas.SetDrawColor(colors.GetColor4ub('DarkCyan'))
-        canvas.FillTriangle(10,10,25,10,25,25)  # test if canvas visible, no triangle there 
+        canvas.FillTriangle(0,0,50,20,25,25)  # test if canvas visible, no triangle there 
         canvas.Update()
         return canvas
 
@@ -274,15 +307,16 @@ class SegmentationModuleTab(QWidget):
         self.brush_size = brush_size  # connect to draw
         #print(self.brush_size)
 
-    # possible to hand over color rather than using two seperate methods?
+    # possible to hand over color rather than using two seperate methods
     def setColorLumen(self):
-        self.canvas.SetDrawColor(self.lumen_rgba)
+        self.canvas.SetDrawColor(216,101,79)  # work with defaults.py?, why is opacity not working?
     def setColorPlaque(self):
-        self.canvas.SetDrawColor(self.plaque_rgba)
+        self.canvas.SetDrawColor(241,214,145)
 
     # merge methods for drawing? 
-    def drawMode(self):  # merge with draw? (put observer in ActivateEditing  and only use draw)
-        self.slice_view.interactor_style.AddObserver("LeftButtonPressEvent", self.draw)  # remove at some point?
+    def drawMode(self):  # merge with draw/activateEditing? (put observer in ActivateEditing  and only use draw)
+        self.slice_view.interactor_style.AddObserver("LeftButtonPressEvent", self.start_draw)  # remove at some point?
+        
         self.lumen_button.setVisible(True)  # set false if exiting drawing/enable only if "draw" clicked 
         self.plaque_button.setVisible(True)
         self.brush_size_slider.setVisible(True)
