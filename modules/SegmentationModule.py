@@ -92,6 +92,8 @@ class SegmentationModuleTab(QWidget):
         self.eraser_button.pressed.connect(self.erase)
         self.brush_size_slider.valueChanged[int].connect(self.brushSizeChanged)
         self.stop_editing_button.pressed.connect(self.inactivateEditing)
+        self.lumen_button.pressed.connect(self.setColorLumen)  # to-do: show that selected if clicked
+        self.plaque_button.pressed.connect(self.setColorPlaque)
 
         # initialize VTK
         self.slice_view.Initialize()
@@ -194,7 +196,7 @@ class SegmentationModuleTab(QWidget):
         self.stop_editing_button.setVisible(True)
         self.edit_button.setEnabled(False)
 
-        # define lookup-table for label map
+        # define lookup-table for label map -> put label map into canvas
         self.lookuptable =vtk.vtkLookupTable() # vtk.vtkWindowLevelLookupTable()
         self.lookuptable.SetNumberOfTableValues(3)
         self.lookuptable.SetTableRange(0,2)
@@ -204,17 +206,12 @@ class SegmentationModuleTab(QWidget):
         self.plaque_rgba = COLOR_PLAQUE + alpha  # plaque also red ?  -  color and transperancy changes when clicked left and mouse wheel (only when in editing mode, does not work when clicked on brush)
         self.lookuptable.SetTableValue(1, self.plaque_rgba)
         self.lookuptable.SetTableValue(2, self.lumen_rgba)
-        #self.lookuptable.GetIndexedColor(0, [0.0, 0.0, 0.0, 0.0])
-        #self.lookuptable.GetIndexedColor(1, list(self.plaque_rgba))
-        #self.lookuptable.GetIndexedColor(2, list(self.lumen_rgba))
         self.lookuptable.Build() 
         
         self.masks_color_mapped = vtk.vtkImageMapToColors() 
         self.masks_color_mapped.SetLookupTable(self.lookuptable) 
         self.masks_color_mapped.PassAlphaToOutputOn()
         self.masks_color_mapped.SetInputData(self.model_view.label_map)  
-        #self.masks_color_mapped.SetColorModeToMapScalars()
-        
         
         self.mask_slice_mapper = vtk.vtkOpenGLImageSliceMapper()  
         self.mask_slice_mapper.SetInputConnection(self.masks_color_mapped.GetOutputPort())
@@ -226,47 +223,31 @@ class SegmentationModuleTab(QWidget):
         self.mask_slice_actor.InterpolateOff()
         self.mask_slice_actor.SetMapper(self.mask_slice_mapper)
         self.mask_slice_actor.SetPosition(self.slice_view.image_actor.GetPosition())
-        
+       
+
         # define canvas to draw changes of segmentation on 
         self.canvas = self.setUpCanvas()
-        ################### using logowidget
-        #self.canvas_logo = vtk.vtkLogoRepresentation()
-        #self.canvas_logo.SetImage(self.canvas.GetOutput())
-        #self.canvas_logo.SetPosition(self.slice_view.image_actor.GetPosition()[0], self.slice_view.image_actor.GetPosition()[1])
-        #self.canvas_logo.SetPosition2(self.slice_view.image_actor.GetPosition2()[0],self.slice_view.image_actor.GetPosition2()[1])
-        #self.canvas_logo.GetImageProperty().SetOpacity(0.75)
-        #self.canvas_widget = vtk.vtkLogoWidget()
-        #self.canvas_widget.SetInteractor(self.slice_view)
-        #self.canvas_widget.SetRepresentation(self.canvas_logo)
+        self.canvas_mapper = vtk.vtkOpenGLImageSliceMapper()
+        self.canvas_mapper.SetInputConnection(self.canvas.GetOutputPort())
+        self.canvas_mapper.SliceAtFocalPointOff()  # ??
+        self.canvas_mapper.SetNumberOfThreads(1)  # ??
+        self.canvas_mapper.SetSliceNumber(self.slice_view.slice)
 
-        ################## using blender 
-        #self.slice_view.renderer.RemoveActor(self.slice_view.image_actor)
-        #self.blender = vtk.vtkImageBlend()
-        #self.blender.SetOpacity(1, 0.75)
-        #self.blender.SetInputData(self.slice_view.image_actor.GetInput())
-        #self.blender.SetInputConnection(self.slice_view.image_mapper.GetOutputPort())  # what to take as input for the sliced medical data? 
-        #self.blender.SetInputConnection(self.canvas.GetOutputPort())
-        #self.blender.Update()
-
-        #self.blender_mapper = vtk.vtkDataSetMapper()
-        #self.blender_actor = vtk.vtkActor()
-        #self.blender_actor.SetMapper(self.blender_mapper)
-
-        ################## trying to display it same as image 
         self.canvas_actor = vtk.vtkImageActor()  # ad actor below 
         self.canvas_actor.InterpolateOff()
-        self.canvas_actor.GetMapper().SetInputConnection(self.canvas.GetOutputPort())
-        img_pos = self.slice_view.image_actor.GetPosition()
-        self.canvas_actor.SetPosition(img_pos)  
+        self.canvas_actor.GetProperty().SetOpacity(0.3) # any other solution to implement without opycity?
+        self.canvas_actor.SetPosition(self.image.GetOrigin()[0],self.image.GetOrigin()[1],self.image.GetOrigin()[2]-self.slice_view.slice)  # (self.image.GetOrigin())
+        self.canvas_actor.SetMapper(self.canvas_mapper)
+
+        # circle around mouse when drawing 
+        self.circle_actor = self.circleActor()
 
         self.slice_view.renderer.RemoveActor(self.lumen_outline_actor2D)
         self.slice_view.renderer.RemoveActor(self.plaque_outline_actor2D)
         self.slice_view.renderer.AddActor(self.mask_slice_actor)
-        self.slice_view.renderer.AddActor(self.canvas_actor)  # actor depending on approach 
-        ## is canvas displayed at right position (on top of image slice -> SetPosition of canvas actor)?
+        self.slice_view.renderer.AddActor(self.canvas_actor)  
+        self.slice_view.renderer.AddActor(self.circle_actor)
         self.slice_view.GetRenderWindow().Render()
-        #self.canvas_widget.On()  
-        #self.slice_view.GetRenderWindow().Render()
         self.data_modified.emit() 
       
         
@@ -288,81 +269,109 @@ class SegmentationModuleTab(QWidget):
     
     def setUpCanvas(self):
         # if in activateEditing -> crash 
-        colors = vtk.vtkNamedColors()
         canvas = vtk.vtkImageCanvasSource2D()
-        lm_extent = self.model_view.label_map.GetExtent()
-        canvas.SetExtent(lm_extent[0], lm_extent[1], lm_extent[2], lm_extent[3], self.slice_view.slice, self.slice_view.slice)  # instead of slice 0,0
+        img_spacing = self.image.GetSpacing() 
+        ###canvas.SetRatio(img_spacing) -> by setting the extent this seems to happen automatically 
+        # set extent to scalar neccessary? (in vtkimagedata class)
+        img_extent = self.image.GetExtent()
+        canvas.SetExtent(vtk.vtkMath.Ceil(img_extent[0]*img_spacing[0]), vtk.vtkMath.Floor(img_extent[1]*img_spacing[0]), vtk.vtkMath.Ceil(img_extent[2]*img_spacing[1]),vtk.vtkMath.Ceil(img_extent[3]*img_spacing[1]), vtk.vtkMath.Ceil(img_extent[4]*img_spacing[2]), vtk.vtkMath.Floor(img_extent[5]*img_spacing[2]))  # , self.slice_view.slice, self.slice_view.slice)  # (img_extent) #   # instead of slice 0,0
+        #canvas.SetExtent(img_extent[0], img_extent[1],img_extent[2], img_extent[3]+1, img_extent[4], img_extent[5])  #  with this canvas to big
+        canvas.SetDefaultZ(self.slice_view.slice)
         canvas.SetNumberOfScalarComponents(3)  # what exacly does this do?! doc: Set the number of scalar components; in vtkImageData doc: Set/Get the number of scalar components for points. As with the SetScalarType method this is setting pipeline info.
-        canvas.SetDrawColor(colors.GetColor4ub('DarkCyan'))
-        canvas.FillTriangle(0,0,50,20,25,25)  # test if canvas visible, no triangle there 
-        canvas.Update()
+        canvas.SetDrawColor(0,0,0)  
+        self.circle = self.circleActor()
         return canvas
 
     
-    def setSliceEditor(self):
+    def setSliceEditor(self, slice_nr):
         # connect mask slices to current image slice
         if not self.editing_active:
             return   
-        self.mask_slice_mapper.SetSliceNumber(self.slice_view.slice)
-        #self.canvas = self.setUpCanvas()
+        self.mask_slice_mapper.SetSliceNumber(slice_nr)  
+        self.canvas.SetDefaultZ(self.slice_view.slice)  # also connected to position of actor !
+        self.canvas_mapper.SetSliceNumber(slice_nr)
+        self.canvas_actor.SetPosition(self.image.GetOrigin()[0],self.image.GetOrigin()[1],self.image.GetOrigin()[2]-slice_nr)  # 2/3 value by tryout (best found yet) but not all slices have canvas yet/ not 100 working
         self.slice_view.GetRenderWindow().Render()
-
 
     def brushSizeChanged(self, brush_size):
         # to-do: display current size
-        self.brush_size = brush_size  # connect to draw
-        #print(self.brush_size)
-
-    # possible to hand over color rather than using two seperate methods
+        self.brush_size = brush_size  
     def setColorLumen(self):
-        self.canvas.SetDrawColor(216,101,79)  # work with defaults.py?, why is opacity not working?
+        self.canvas.SetDrawColor(216,101,79) 
     def setColorPlaque(self):
         self.canvas.SetDrawColor(241,214,145)
+    
+    def circleActor(self):
+        # set up circle that can be displayed around mouse to show where it will be drawn 
+        self.circle = vtk.vtkRegularPolygonSource()  # is there a way to not do it via approximation of circle? 
+        self.circle.GeneratePolygonOff()
+        self.circle.SetNumberOfSides(50)
+        self.circle.SetRadius(2)  # (self.brush_size*self.image.GetSpacing()[0])
+        #self.circle.SetCenter(self.imgPos)
+        circle_mapper = vtk.vtkPolyDataMapper()
+        circle_mapper.SetInputConnection(self.circle.GetOutputPort())
+        circle_actor = vtk.vtkActor()
+        circle_actor.SetMapper(circle_mapper)
+        circle_actor.GetProperty().SetColor(241,214,100)
+        circle_actor.SetPosition(self.image.GetOrigin()[0], self.image.GetOrigin()[1], self.image.GetOrigin()[2]-self.image.GetExtent()[2])
+        return circle_actor
 
-    # merge methods for drawing? 
-    def drawMode(self):  # merge with draw/activateEditing? (put observer in ActivateEditing  and only use draw)
+    ################# search for other solution than 2x picking (global variable possible?)
+    def circleCursor(self, obj, event):
+        self.slice_view.renderer.AddActor(self.circle_actor)
+        x,y =  self.slice_view.GetEventPosition()
+        picker = vtk.vtkCellPicker()
+        picker.Pick(x,y,self.slice_view.slice,self.slice_view.renderer)
+        self.imgPos = picker.GetPointIJK()
+        self.circle.SetCenter(self.imgPos)  # (self.imgPos[0], self.imgPos[1], self.imgPos[2]-1)
+        self.slice_view.GetRenderWindow().Render()
+
+    
+    def drawMode(self):  
         self.slice_view.interactor_style.AddObserver("LeftButtonPressEvent", self.start_draw)  # remove at some point?
-        
+        #self.slice_view.interactor_style.AddObserver("MouseMoveEvent", self.circleCursor)
+        #self.slice_view.renderer.AddActor(self.circle_actor)  # correct position? 
         self.lumen_button.setVisible(True)  # set false if exiting drawing/enable only if "draw" clicked 
         self.plaque_button.setVisible(True)
         self.brush_size_slider.setVisible(True)
-        self.lumen_button.pressed.connect(self.setColorLumen)  # to-do: show that selected if clicked
-        self.plaque_button.pressed.connect(self.setColorPlaque)
+        self.slice_view.renderer.AddActor(self.circle_actor)
+        self.slice_view.GetRenderWindow().Render()
 
     def start_draw(self, obj, event):
         self.draw(obj, event)  # draw first point at posttion clicked on 
         # draw as long as left mouse button pressed down 
         self.slice_view.interactor_style.AddObserver("MouseMoveEvent", self.draw)  
         self.slice_view.interactor_style.AddObserver("LeftButtonReleaseEvent", self.end_draw)
+        #self.slice_view.interactor_style.AddObserver("MouseMoveEvent", self.circleCursor)
 
-    def draw(self, object, event):  
+    def draw(self, object, event): 
         # get position in image where clicked on -> draw via canvas 
-        # mouse position instead of event position?
         x,y = self.slice_view.GetEventPosition()  
-        picker = vtk.vtkCellPicker()  # other picker?
-        picker.Pick(x,y,self.slice_view.slice,self.slice_view.renderer)  
-        imgPos = picker.GetPointIJK()
-        
-        # catch: not selected if lumen/plaque (set draw color?)
+        picker = vtk.vtkPropPicker()
+        #picker.Pick3DPoint((x,y,self.slice_view.slice),self.slice_view.renderer)  # pick 3dpoint necessary? we know from slice?
+        picker.Pick(x,y,self.slice_view.slice,self.slice_view.renderer) 
+        pos = picker.GetPickPosition()  # world coordinates # (0.0,0.0,0.0) if pick3DPoint
+        #point = picker.GetSelectionPoint()  # screen coordinates
+        origin = self.image.GetOrigin()
+        ##imgPos = ((pos[0]-origin[0])/self.image.GetSpacing()[0], (pos[1]-origin[1])/self.image.GetSpacing()[1], (pos[2]+origin[2])/self.image.GetSpacing()[2])  -> needed when canvas.SetRatio() set 
+        imgPos = ((pos[0]-origin[0]), (pos[1]-origin[1]), (pos[2]+origin[2]))
 
-        # nothing drawn on the image but position printed in prompt (if print not commented out)
-        ## draw point at picked position 
-        self.canvas.DrawPoint(imgPos[0],imgPos[1])
+        self.circle.SetCenter(pos)  # (picker.GetPCoords())  # what does getpcoords does?
+        #self.canvas.DrawPoint(vtk.vtkMath.Round(imgPos[0]),vtk.vtkMath.Roundround(imgPos[1]))
         ## draw box at picked position 
         #self.canvas.FillBox(imgPos[0],imgPos[0]+self.brush_size,imgPos[1],imgPos[1]+self.brush_size)  # (probably) does not draw on actual pixel position - better use drawpoint? any alternative method ?
-        ## draw circle around picked position 
-        #self.canvas.DrawCircle(imgPos[0], imgPos[1], self.brush_size)
+        #draw circle around picked position 
+        self.canvas.DrawCircle(vtk.vtkMath.Round(imgPos[0]), vtk.vtkMath.Round(imgPos[1]), self.brush_size)
         ## and fill area around circle with color
         #self.canvas.FillPixel(imgPos[0],imgPos[1])  # leads to Generic Warning: In ..\Imaging\Sources\vtkImageCanvasSource2D.cxx, line 1219 Fill: Cannot handle draw color same as fill color
        
-        # print("Click Position", self.lastImgPoint) # worldPoint)
-
-        #self.data_modified.emit()  
         self.slice_view.GetRenderWindow().Render()
     
     def end_draw(self, obj, event):
         id = vtk.vtkCommand.MouseMoveEvent
         self.slice_view.interactor_style.RemoveObservers(id)
+        self.slice_view.renderer.RemoveActor(self.circle_actor)
+        #self.slice_view.interactor_style.AddObserver("MouseMoveEvent", self.circleCursor)
 
     def erase(self):
         return 
