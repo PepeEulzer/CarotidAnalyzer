@@ -8,7 +8,7 @@ from vtk.util.numpy_support import vtk_to_numpy
 from PyQt5.QtCore import Qt, pyqtSignal
 from PyQt5.QtWidgets import  (
     QWidget, QVBoxLayout, QHBoxLayout, QSlider, QTabWidget,
-    QPushButton, QMessageBox, QGridLayout
+    QPushButton, QMessageBox, QGridLayout, QLabel
 )
 
 from modules.Interactors import ImageSliceInteractor, IsosurfaceInteractor
@@ -42,12 +42,17 @@ class SegmentationModuleTab(QWidget):
         self.brush_size_slider.setMaximum(10)
         self.brush_size_slider.setSingleStep(1)
         self.brush_size_slider.setValue(0)
+        #self.brush_size_slider.setTickPosition(QSlider.TicksBelow)
+        self.brush_size_slider.setTickInterval(1)
+        self.brush_slider_label = QLabel()
+        self.brush_slider_label.setText("Brush Size")  # NOT SHOWING
         self.brush_button.setVisible(False)
         self.eraser_button.setVisible(False)
         self.stop_editing_button.setVisible(False)
         self.lumen_button.setVisible(False)
         self.plaque_button.setVisible(False)
         self.brush_size_slider.setVisible(False)
+        self.brush_slider_label.setVisible(False)
         self.slice_view = ImageSliceInteractor(self)
         self.slice_view.renderer.GetActiveCamera().SetViewUp(0, 1, 0)
         self.slice_view_slider = QSlider(Qt.Horizontal)
@@ -58,6 +63,7 @@ class SegmentationModuleTab(QWidget):
         self.slice_view_layout = QVBoxLayout()
         self.slice_view_layout.addWidget(self.CNN_button)
         self.slice_view_layout.addWidget(self.edit_button)
+        #self.slice_view_layout.addWidget(self.brush_slider_label)
         self.slice_view_layout.addWidget(self.slice_view_slider)
         self.slice_view_layout.addWidget(self.slice_view)
 
@@ -66,9 +72,10 @@ class SegmentationModuleTab(QWidget):
         self.edit_buttons_layout.addWidget(self.brush_button, 0,0,1,2) 
         self.edit_buttons_layout.addWidget(self.lumen_button, 1,0)
         self.edit_buttons_layout.addWidget(self.plaque_button, 1,1)
-        self.edit_buttons_layout.addWidget(self.brush_size_slider, 2,0,1,2)
-        self.edit_buttons_layout.addWidget(self.eraser_button, 3,0,1,2)
-        self.edit_buttons_layout.addWidget(self.stop_editing_button, 4,0,1,2)
+        self.edit_buttons_layout.addWidget(self.brush_slider_label, 2,0,1,2)
+        self.edit_buttons_layout.addWidget(self.brush_size_slider, 3,0,1,2)
+        self.edit_buttons_layout.addWidget(self.eraser_button, 4,0,1,2)
+        self.edit_buttons_layout.addWidget(self.stop_editing_button, 5,0,1,2)
 
         self.top_layout = QHBoxLayout(self)
         self.top_layout.addLayout(self.slice_view_layout)
@@ -189,7 +196,7 @@ class SegmentationModuleTab(QWidget):
 
     def activateEditing(self):
         ### catch: no patient data loaded/hide button as long as no patient data loaded
-        
+        ## would it be better to save initialized object when editing mode is acitvated once and then to reuse them when activated again?
         self.editing_active = True 
         self.brush_button.setVisible(True)
         self.eraser_button.setVisible(True)
@@ -215,8 +222,6 @@ class SegmentationModuleTab(QWidget):
         
         self.mask_slice_mapper = vtk.vtkOpenGLImageSliceMapper()  
         self.mask_slice_mapper.SetInputConnection(self.masks_color_mapped.GetOutputPort())
-        self.mask_slice_mapper.SliceAtFocalPointOff() 
-        self.mask_slice_mapper.SetNumberOfThreads(1)
         self.mask_slice_mapper.SetSliceNumber(self.slice_view.slice)
         
         self.mask_slice_actor = vtk.vtkImageActor()
@@ -229,8 +234,6 @@ class SegmentationModuleTab(QWidget):
         self.canvas = self.setUpCanvas()
         self.canvas_mapper = vtk.vtkOpenGLImageSliceMapper()
         self.canvas_mapper.SetInputConnection(self.canvas.GetOutputPort())
-        self.canvas_mapper.SliceAtFocalPointOff()  # ??
-        self.canvas_mapper.SetNumberOfThreads(1)  # ??
         self.canvas_mapper.SetSliceNumber(self.slice_view.slice)
 
         self.canvas_actor = vtk.vtkImageActor()  # ad actor below 
@@ -240,19 +243,26 @@ class SegmentationModuleTab(QWidget):
         self.canvas_actor.SetMapper(self.canvas_mapper)
 
         # circle around mouse when drawing 
-        self.circle_actor = self.circleActor()
+        self.circle = self.setUpCircle()
+        self.circle.SetCenter(self.image.GetOrigin()[0], self.image.GetOrigin()[1], self.image.GetOrigin()[2]-self.image.GetExtent()[2])
+        circle_mapper = vtk.vtkPolyDataMapper()
+        circle_mapper.SetInputConnection(self.circle.GetOutputPort())
+        self.circle_actor = vtk.vtkActor()
+        self.circle_actor.SetMapper(circle_mapper)
+        color = vtk.vtkNamedColors()
+        self.circle_actor.GetProperty().SetColor(color.GetColor3d('LightCyan'))  # SetColor(241,214,145)  # color not working -> other setting of color needed/sth similar to setnumberofscalarvalues in canvas needed??
+        #self.circle_actor.SetPosition(self.image.GetOrigin()[0], self.image.GetOrigin()[1], self.image.GetOrigin()[2]-self.image.GetExtent()[2])
 
         self.slice_view.renderer.RemoveActor(self.lumen_outline_actor2D)
         self.slice_view.renderer.RemoveActor(self.plaque_outline_actor2D)
         self.slice_view.renderer.AddActor(self.mask_slice_actor)
         self.slice_view.renderer.AddActor(self.canvas_actor)  
-        self.slice_view.renderer.AddActor(self.circle_actor)
         self.slice_view.GetRenderWindow().Render()
         self.data_modified.emit() 
       
         
     def inactivateEditing(self):
-        # show message, that changes will be lost 
+        # show message, that changes will be lost (or store temporally)
         self.editing_active = False
         self.brush_button.setVisible(False)
         self.eraser_button.setVisible(False)
@@ -260,11 +270,13 @@ class SegmentationModuleTab(QWidget):
         self.lumen_button.setVisible(False)
         self.plaque_button.setVisible(False)
         self.brush_size_slider.setVisible(False)
+        self.brush_slider_label.setVisible(False)
         self.edit_button.setEnabled(True)
         self.slice_view.renderer.AddActor(self.lumen_outline_actor2D)
         self.slice_view.renderer.AddActor(self.plaque_outline_actor2D)
         self.slice_view.renderer.RemoveActor(self.mask_slice_actor)
         self.slice_view.renderer.RemoveActor(self.canvas_actor)
+        self.slice_view.renderer.RemoveActor(self.circle_actor)
         self.slice_view.GetRenderWindow().Render()
     
     def setUpCanvas(self):
@@ -279,10 +291,16 @@ class SegmentationModuleTab(QWidget):
         canvas.SetDefaultZ(self.slice_view.slice)
         canvas.SetNumberOfScalarComponents(3)  # what exacly does this do?! doc: Set the number of scalar components; in vtkImageData doc: Set/Get the number of scalar components for points. As with the SetScalarType method this is setting pipeline info.
         canvas.SetDrawColor(0,0,0)  
-        self.circle = self.circleActor()
         return canvas
 
-    
+    def setUpCircle(self): 
+        #set up circle to display around cursor and to display brush size  
+        circle = vtk.vtkRegularPolygonSource()  # is there a way to not do it via approximation of circle? 
+        circle.GeneratePolygonOff()
+        circle.SetNumberOfSides(30)
+        circle.SetRadius(self.brush_size)  #*self.image.GetSpacing()[0] ? 
+        return circle
+
     def setSliceEditor(self, slice_nr):
         # connect mask slices to current image slice
         if not self.editing_active:
@@ -294,47 +312,39 @@ class SegmentationModuleTab(QWidget):
         self.slice_view.GetRenderWindow().Render()
 
     def brushSizeChanged(self, brush_size):
-        # to-do: display current size
+        # change size of drawing on canvas 
         self.brush_size = brush_size  
-    def setColorLumen(self):
+        self.circle.SetRadius(brush_size)  # *image spacing?? 
+        self.slice_view.GetRenderWindow().Render()
+    def setColorLumen(self):  
         self.canvas.SetDrawColor(216,101,79) 
     def setColorPlaque(self):
         self.canvas.SetDrawColor(241,214,145)
     
-    def circleActor(self):
-        # set up circle that can be displayed around mouse to show where it will be drawn 
-        self.circle = vtk.vtkRegularPolygonSource()  # is there a way to not do it via approximation of circle? 
-        self.circle.GeneratePolygonOff()
-        self.circle.SetNumberOfSides(50)
-        self.circle.SetRadius(2)  # (self.brush_size*self.image.GetSpacing()[0])
-        #self.circle.SetCenter(self.imgPos)
-        circle_mapper = vtk.vtkPolyDataMapper()
-        circle_mapper.SetInputConnection(self.circle.GetOutputPort())
-        circle_actor = vtk.vtkActor()
-        circle_actor.SetMapper(circle_mapper)
-        circle_actor.GetProperty().SetColor(241,214,100)
-        circle_actor.SetPosition(self.image.GetOrigin()[0], self.image.GetOrigin()[1], self.image.GetOrigin()[2]-self.image.GetExtent()[2])
-        return circle_actor
-
-    ################# search for other solution than 2x picking (global variable possible?)
-    def circleCursor(self, obj, event):
-        self.slice_view.renderer.AddActor(self.circle_actor)
-        x,y =  self.slice_view.GetEventPosition()
-        picker = vtk.vtkCellPicker()
-        picker.Pick(x,y,self.slice_view.slice,self.slice_view.renderer)
-        self.imgPos = picker.GetPointIJK()
-        self.circle.SetCenter(self.imgPos)  # (self.imgPos[0], self.imgPos[1], self.imgPos[2]-1)
-        self.slice_view.GetRenderWindow().Render()
-
-    
     def drawMode(self):  
+        self.slice_view.interactor_style.AddObserver("MouseMoveEvent", self.pickPosition)
         self.slice_view.interactor_style.AddObserver("LeftButtonPressEvent", self.start_draw)  # remove at some point?
         #self.slice_view.interactor_style.AddObserver("MouseMoveEvent", self.circleCursor)
         #self.slice_view.renderer.AddActor(self.circle_actor)  # correct position? 
         self.lumen_button.setVisible(True)  # set false if exiting drawing/enable only if "draw" clicked 
         self.plaque_button.setVisible(True)
         self.brush_size_slider.setVisible(True)
-        self.slice_view.renderer.AddActor(self.circle_actor)
+        #self.brush_slider_label.setVisible(True)  # when label included positioning not great (possible to fix postion?)
+        self.slice_view.renderer.AddActor(self.circle_actor)  # dissappers when sth is drawn on canvas 
+        #self.circle.SetCenter()
+        self.slice_view.GetRenderWindow().Render()
+    
+
+    def pickPosition(self, obj, event):
+        x,y = self.slice_view.GetEventPosition()  
+        picker = vtk.vtkPropPicker()
+        picker.Pick(x,y,self.slice_view.slice,self.slice_view.renderer) 
+        position = picker.GetPickPosition()  # world coordinates # (0.0,0.0,0.0) if pick3DPoint
+        origin = self.image.GetOrigin()
+        self.imgPos = ((position[0]-origin[0]), (position[1]-origin[1]), (position[2]+origin[2]))  # convert into image position
+        ##imgPos = ((pos[0]-origin[0])/self.image.GetSpacing()[0], (pos[1]-origin[1])/self.image.GetSpacing()[1], (pos[2]+origin[2])/self.image.GetSpacing()[2])  -> needed when canvas.SetRatio() set 
+        self.circle.SetCenter(position[0],position[1],self.image.GetOrigin()[2]-self.image.GetExtent()[2])  # move circle if mouse moved 
+        #self.circle_actor.SetPosition(position[0], position[1], self.image.GetOrigin()[2]-self.image.GetExtent()[2])
         self.slice_view.GetRenderWindow().Render()
 
     def start_draw(self, obj, event):
@@ -342,36 +352,22 @@ class SegmentationModuleTab(QWidget):
         # draw as long as left mouse button pressed down 
         self.slice_view.interactor_style.AddObserver("MouseMoveEvent", self.draw)  
         self.slice_view.interactor_style.AddObserver("LeftButtonReleaseEvent", self.end_draw)
-        #self.slice_view.interactor_style.AddObserver("MouseMoveEvent", self.circleCursor)
-
+    
     def draw(self, object, event): 
-        # get position in image where clicked on -> draw via canvas 
-        x,y = self.slice_view.GetEventPosition()  
-        picker = vtk.vtkPropPicker()
-        #picker.Pick3DPoint((x,y,self.slice_view.slice),self.slice_view.renderer)  # pick 3dpoint necessary? we know from slice?
-        picker.Pick(x,y,self.slice_view.slice,self.slice_view.renderer) 
-        pos = picker.GetPickPosition()  # world coordinates # (0.0,0.0,0.0) if pick3DPoint
-        #point = picker.GetSelectionPoint()  # screen coordinates
-        origin = self.image.GetOrigin()
-        ##imgPos = ((pos[0]-origin[0])/self.image.GetSpacing()[0], (pos[1]-origin[1])/self.image.GetSpacing()[1], (pos[2]+origin[2])/self.image.GetSpacing()[2])  -> needed when canvas.SetRatio() set 
-        imgPos = ((pos[0]-origin[0]), (pos[1]-origin[1]), (pos[2]+origin[2]))
-
-        self.circle.SetCenter(pos)  # (picker.GetPCoords())  # what does getpcoords does?
+        #draw point
         #self.canvas.DrawPoint(vtk.vtkMath.Round(imgPos[0]),vtk.vtkMath.Roundround(imgPos[1]))
         ## draw box at picked position 
         #self.canvas.FillBox(imgPos[0],imgPos[0]+self.brush_size,imgPos[1],imgPos[1]+self.brush_size)  # (probably) does not draw on actual pixel position - better use drawpoint? any alternative method ?
         #draw circle around picked position 
-        self.canvas.DrawCircle(vtk.vtkMath.Round(imgPos[0]), vtk.vtkMath.Round(imgPos[1]), self.brush_size)
+        self.canvas.DrawCircle(vtk.vtkMath.Round(self.imgPos[0]), vtk.vtkMath.Round(self.imgPos[1]), self.brush_size)  # for bigger circles not everything filled out 
         ## and fill area around circle with color
         #self.canvas.FillPixel(imgPos[0],imgPos[1])  # leads to Generic Warning: In ..\Imaging\Sources\vtkImageCanvasSource2D.cxx, line 1219 Fill: Cannot handle draw color same as fill color
-       
         self.slice_view.GetRenderWindow().Render()
     
     def end_draw(self, obj, event):
         id = vtk.vtkCommand.MouseMoveEvent
-        self.slice_view.interactor_style.RemoveObservers(id)
-        self.slice_view.renderer.RemoveActor(self.circle_actor)
-        #self.slice_view.interactor_style.AddObserver("MouseMoveEvent", self.circleCursor)
+        self.slice_view.interactor_style.RemoveObservers(id)  # is it possible to just remove one of the observers?
+        self.slice_view.interactor_style.AddObserver("MouseMoveEvent", self.pickPosition)
 
     def erase(self):
         return 
