@@ -8,7 +8,7 @@ from vtk.util.numpy_support import vtk_to_numpy
 from PyQt5.QtCore import Qt, pyqtSignal
 from PyQt5.QtWidgets import  (
     QWidget, QVBoxLayout, QHBoxLayout, QSlider, QTabWidget,
-    QPushButton, QMessageBox, QGridLayout, QLabel
+    QPushButton, QMessageBox, QGridLayout, QLabel, QGroupBox
 )
 
 from modules.Interactors import ImageSliceInteractor, IsosurfaceInteractor
@@ -27,17 +27,19 @@ class SegmentationModuleTab(QWidget):
         self.volume_file = False
         self.pred_file = False
         self.editing_active = False
-        self.brush_size = 0.488281  # get Spacing of image here 
+        self.brush_size = None  # 0.488281  # get Spacing of image here 
+        self.canvas = None
         
         # on-screen objects
         self.CNN_button = QPushButton("New Segmentation: Initialize with CNN")
-        self.edit_button = QPushButton("Edit Segmentation")  # TO-DO: enable=false if no data loaded 
+        self.edit_button = QPushButton("Edit Segmentation")  
+        self.edit_button.setEnabled(False)
         self.brush_button = QPushButton("Brush") 
-        self.eraser_button = QPushButton("Eraser")
         self.stop_editing_button = QPushButton("Stop Editing")
         self.lumen_button = QPushButton("Lumen")
         self.plaque_button = QPushButton("Plaque")
-        self.brush_size_slider = QSlider(Qt.Horizontal)  # label?/somehow display brush size around cursor (maybe similar to 3D Slicer)
+        self.eraser_button = QPushButton("Eraser")
+        self.brush_size_slider = QSlider(Qt.Horizontal)  
         self.brush_size_slider.setMinimum(1)
         self.brush_size_slider.setMaximum(31)
         self.brush_size_slider.setSingleStep(2)
@@ -45,7 +47,7 @@ class SegmentationModuleTab(QWidget):
         #self.brush_size_slider.setTickPosition(QSlider.TicksBelow)
         self.brush_size_slider.setTickInterval(1)
         self.brush_slider_label = QLabel()
-        self.brush_slider_label.setText("Brush Size")  # NOT SHOWING
+        self.brush_slider_label.setText("Brush/Eraser Size") 
         self.brush_button.setVisible(False)
         self.eraser_button.setVisible(False)
         self.stop_editing_button.setVisible(False)
@@ -63,19 +65,20 @@ class SegmentationModuleTab(QWidget):
         self.slice_view_layout = QVBoxLayout()
         self.slice_view_layout.addWidget(self.CNN_button)
         self.slice_view_layout.addWidget(self.edit_button)
-        #self.slice_view_layout.addWidget(self.brush_slider_label)
         self.slice_view_layout.addWidget(self.slice_view_slider)
         self.slice_view_layout.addWidget(self.slice_view)
 
         #self.edit_buttons_layout = QVBoxLayout()
         self.edit_buttons_layout = QGridLayout()
+        self.edit_buttons_layout.setVerticalSpacing(30)  
         self.edit_buttons_layout.addWidget(self.brush_button, 0,0,1,2) 
         self.edit_buttons_layout.addWidget(self.lumen_button, 1,0)
         self.edit_buttons_layout.addWidget(self.plaque_button, 1,1)
-        self.edit_buttons_layout.addWidget(self.brush_slider_label, 2,0,1,2)
-        self.edit_buttons_layout.addWidget(self.brush_size_slider, 3,0,1,2)
-        self.edit_buttons_layout.addWidget(self.eraser_button, 4,0,1,2)
+        self.edit_buttons_layout.addWidget(self.eraser_button, 2,0,1,2)
+        self.edit_buttons_layout.addWidget(self.brush_slider_label, 3,0,1,2)
+        self.edit_buttons_layout.addWidget(self.brush_size_slider, 4,0,1,2)
         self.edit_buttons_layout.addWidget(self.stop_editing_button, 5,0,1,2)
+        self.edit_buttons_layout.setRowStretch(7,1)  
 
         self.top_layout = QHBoxLayout(self)
         self.top_layout.addLayout(self.slice_view_layout)
@@ -99,7 +102,7 @@ class SegmentationModuleTab(QWidget):
         self.eraser_button.pressed.connect(self.erase)
         self.brush_size_slider.valueChanged[int].connect(self.brushSizeChanged)
         self.stop_editing_button.pressed.connect(self.inactivateEditing)
-        self.lumen_button.pressed.connect(self.setColorLumen)  # to-do: show that selected if clicked
+        self.lumen_button.pressed.connect(self.setColorLumen)  
         self.plaque_button.pressed.connect(self.setColorPlaque)
 
         # initialize VTK
@@ -150,6 +153,8 @@ class SegmentationModuleTab(QWidget):
         self.pred_file = pred_file
         if volume_file:
             self.image = self.slice_view.loadNrrd(volume_file, False)
+            self.brush_size = self.image.GetSpacing()[0]
+            self.edit_button.setEnabled(True)
             self.slice_view_slider.setRange(
                 self.slice_view.min_slice,
                 self.slice_view.max_slice
@@ -195,64 +200,67 @@ class SegmentationModuleTab(QWidget):
 
 
     def activateEditing(self):
-        ### catch: no patient data loaded/hide button as long as no patient data loaded
-        ## would it be better to save initialized object when editing mode is acitvated once and then to reuse them when activated again?
         # show all buttons that are needed editing
         self.editing_active = True 
         self.brush_button.setVisible(True)
-        self.eraser_button.setVisible(True)
         self.stop_editing_button.setVisible(True)
         self.edit_button.setEnabled(False)
 
-        # define lookup-table for label map -> put label map into canvas
-        self.lookuptable =vtk.vtkLookupTable() # vtk.vtkWindowLevelLookupTable()
-        self.lookuptable.SetNumberOfTableValues(3)
-        self.lookuptable.SetTableRange(0,2)
-        self.lookuptable.SetTableValue(0, 0.0, 0.0, 0.0, 0.0)  # set color of backround (id 0) to black with transparency 0
-        alpha = (0.5,)
-        self.lumen_rgba = COLOR_LUMEN + alpha
-        self.plaque_rgba = COLOR_PLAQUE + alpha  
-        self.lookuptable.SetTableValue(1, self.plaque_rgba)
-        self.lookuptable.SetTableValue(2, self.lumen_rgba)
-        self.lookuptable.Build() 
+        if not self.canvas:  # set up canvas etc if user activates editing for the first time 
+            # define lookup-table for label map -> put label map into canvas
+            self.lookuptable =vtk.vtkLookupTable() 
+            self.lookuptable.SetNumberOfTableValues(3)
+            self.lookuptable.SetTableRange(0,2)
+            self.lookuptable.SetTableValue(0, 0.0, 0.0, 0.0, 0.0)  # set color of backround (id 0) to black with transparency 0
+            alpha = (0.5,)
+            self.lumen_rgba = COLOR_LUMEN + alpha
+            self.plaque_rgba = COLOR_PLAQUE + alpha  
+            self.lookuptable.SetTableValue(1, self.plaque_rgba)
+            self.lookuptable.SetTableValue(2, self.lumen_rgba)
+            self.lookuptable.Build() 
+            
+            self.masks_color_mapped = vtk.vtkImageMapToColors() 
+            self.masks_color_mapped.SetLookupTable(self.lookuptable) 
+            self.masks_color_mapped.PassAlphaToOutputOn()
+            self.masks_color_mapped.SetInputData(self.model_view.label_map)  
+            
+            self.mask_slice_mapper = vtk.vtkOpenGLImageSliceMapper()  
+            self.mask_slice_mapper.SetInputConnection(self.masks_color_mapped.GetOutputPort())
+            self.mask_slice_mapper.SetSliceNumber(self.slice_view.slice)
+            
+            self.mask_slice_actor = vtk.vtkImageActor()
+            self.mask_slice_actor.InterpolateOff()
+            self.mask_slice_actor.SetMapper(self.mask_slice_mapper)
+            self.mask_slice_actor.SetPosition(self.slice_view.image_actor.GetPosition())
         
-        self.masks_color_mapped = vtk.vtkImageMapToColors() 
-        self.masks_color_mapped.SetLookupTable(self.lookuptable) 
-        self.masks_color_mapped.PassAlphaToOutputOn()
-        self.masks_color_mapped.SetInputData(self.model_view.label_map)  
-        
-        self.mask_slice_mapper = vtk.vtkOpenGLImageSliceMapper()  
-        self.mask_slice_mapper.SetInputConnection(self.masks_color_mapped.GetOutputPort())
-        self.mask_slice_mapper.SetSliceNumber(self.slice_view.slice)
-        
-        self.mask_slice_actor = vtk.vtkImageActor()
-        self.mask_slice_actor.InterpolateOff()
-        self.mask_slice_actor.SetMapper(self.mask_slice_mapper)
-        self.mask_slice_actor.SetPosition(self.slice_view.image_actor.GetPosition())
-       
 
-        # define canvas to draw changes of segmentation on 
-        self.canvas = self.setUpCanvas()
-        self.canvas_mapper = vtk.vtkOpenGLImageSliceMapper()
-        self.canvas_mapper.SetInputConnection(self.canvas.GetOutputPort())
-        self.canvas_mapper.SetSliceNumber(self.slice_view.slice)
+            # define canvas to draw changes of segmentation on 
+            self.canvas = vtk.vtkImageCanvasSource2D()
+            img_extent = self.image.GetExtent() 
+            self.canvas.SetExtent(img_extent)
+            self.canvas.SetDefaultZ(self.slice_view.slice)
+            self.canvas.SetNumberOfScalarComponents(3)  
+            self.canvas.SetDrawColor(0,0,0) 
+            self.canvas_mapper = vtk.vtkOpenGLImageSliceMapper()
+            self.canvas_mapper.SetInputConnection(self.canvas.GetOutputPort())
+            self.canvas_mapper.SetSliceNumber(self.slice_view.slice)
 
-        self.canvas_actor = vtk.vtkImageActor()  
-        self.canvas_actor.InterpolateOff()
-        self.canvas_actor.SetScale(self.image.GetSpacing())
-        self.canvas_actor.GetProperty().SetOpacity(0.3) # any other solution to implement without opycity?
-        self.canvas_actor.SetPosition(self.image.GetOrigin()[0],self.image.GetOrigin()[1],self.image.GetOrigin()[2]-self.slice_view.slice)  
-        self.canvas_actor.SetMapper(self.canvas_mapper)
+            self.canvas_actor = vtk.vtkImageActor()  
+            self.canvas_actor.InterpolateOff()
+            self.canvas_actor.SetScale(self.image.GetSpacing())
+            self.canvas_actor.GetProperty().SetOpacity(0.2) # any other solution to implement without opycity?
+            self.canvas_actor.SetPosition(self.image.GetOrigin()[0],self.image.GetOrigin()[1],self.image.GetOrigin()[2]-self.slice_view.slice)  
+            self.canvas_actor.SetMapper(self.canvas_mapper)
 
-        # circle around mouse when drawing 
-        self.circle = self.setUpCircle()
-        self.circle.SetCenter(self.image.GetOrigin()[0], self.image.GetOrigin()[1], self.image.GetOrigin()[2]-self.image.GetExtent()[2])
-        circle_mapper = vtk.vtkPolyDataMapper()
-        circle_mapper.SetInputConnection(self.circle.GetOutputPort())
-        self.circle_actor = vtk.vtkActor()
-        self.circle_actor.SetMapper(circle_mapper)
-        color = vtk.vtkNamedColors() 
-        self.circle_actor.GetProperty().SetColor(color.GetColor3d('LightCyan'))  # SetColor(241,214,145)  # color not working -> other setting of color needed/sth similar to setnumberofscalarvalues in canvas needed??
+            # circle around mouse when drawing 
+            self.circle = self.setUpCircle()
+            #self.circle.SetCenter(self.image.GetOrigin()[0], self.image.GetOrigin()[1], self.image.GetOrigin()[2]-self.image.GetExtent()[2])
+            circle_mapper = vtk.vtkPolyDataMapper()
+            circle_mapper.SetInputConnection(self.circle.GetOutputPort())
+            self.circle_actor = vtk.vtkActor()
+            self.circle_actor.SetMapper(circle_mapper)
+            color = vtk.vtkNamedColors() 
+            self.circle_actor.GetProperty().SetColor(color.GetColor3d('LightCyan'))  # SetColor(241,214,145)  # color not working -> other setting of color needed/sth similar to setnumberofscalarvalues in canvas needed??
     
         self.slice_view.renderer.RemoveActor(self.lumen_outline_actor2D)
         self.slice_view.renderer.RemoveActor(self.plaque_outline_actor2D)
@@ -263,14 +271,16 @@ class SegmentationModuleTab(QWidget):
       
         
     def inactivateEditing(self):
-        # show message, that changes will be lost (or store temporally)
         # hide all buttons and remove all actors for editing, enable editing again
         self.editing_active = False
         self.brush_button.setVisible(False)
-        self.eraser_button.setVisible(False)
         self.stop_editing_button.setVisible(False)
         self.lumen_button.setVisible(False)
+        self.lumen_button.setStyleSheet("background-color: light gray")
         self.plaque_button.setVisible(False)
+        self.plaque_button.setStyleSheet("background-color: light gray")
+        self.eraser_button.setVisible(False)
+        self.eraser_button.setStyleSheet("background-color: light gray")
         self.brush_size_slider.setVisible(False)
         self.brush_slider_label.setVisible(False)
         self.edit_button.setEnabled(True)
@@ -280,15 +290,6 @@ class SegmentationModuleTab(QWidget):
         self.slice_view.renderer.RemoveActor(self.canvas_actor)
         self.slice_view.renderer.RemoveActor(self.circle_actor)
         self.slice_view.GetRenderWindow().Render()
-    
-    def setUpCanvas(self):
-        canvas = vtk.vtkImageCanvasSource2D()
-        img_extent = self.image.GetExtent() 
-        canvas.SetExtent(img_extent)
-        canvas.SetDefaultZ(self.slice_view.slice)
-        canvas.SetNumberOfScalarComponents(3)  
-        canvas.SetDrawColor(0,0,0)  
-        return canvas
 
     def setUpCircle(self): 
         #set up circle to display around cursor and to display brush size  
@@ -315,20 +316,31 @@ class SegmentationModuleTab(QWidget):
         self.slice_view.GetRenderWindow().Render()
     def setColorLumen(self):  
         self.canvas.SetDrawColor(216,101,79) 
+        self.lumen_button.setStyleSheet("background-color:rgb(216,101,79)")
+        self.plaque_button.setStyleSheet("background-color: light gray")
+        self.eraser_button.setStyleSheet("background-color: light gray")
     def setColorPlaque(self):
         self.canvas.SetDrawColor(241,214,145)
+        self.lumen_button.setStyleSheet("background-color: light gray")
+        self.plaque_button.setStyleSheet("background-color: rgb(241,214,145)")
+        self.eraser_button.setStyleSheet("background-color: light gray")
+    def erase(self):
+        self.canvas.SetDrawColor(0,0,0) 
+        self.lumen_button.setStyleSheet("background-color: light gray")
+        self.plaque_button.setStyleSheet("background-color: light gray")
+        self.eraser_button.setStyleSheet("background-color: rgb(50,50,50)")
     
     def drawMode(self):  
         self.slice_view.interactor_style.AddObserver("MouseMoveEvent", self.pickPosition)
         self.slice_view.interactor_style.AddObserver("LeftButtonPressEvent", self.start_draw)  # remove at some point?
         self.lumen_button.setVisible(True)  # set false if exiting drawing/enable only if "draw" clicked 
         self.plaque_button.setVisible(True)
+        self.eraser_button.setVisible(True)
         self.brush_size_slider.setVisible(True)
-        #self.brush_slider_label.setVisible(True)  # when label included positioning not great (possible to fix postion?)
+        self.brush_slider_label.setVisible(True)  # when label included positioning not great (possible to fix postion?)
         self.slice_view.renderer.AddActor(self.circle_actor)  
         self.slice_view.GetRenderWindow().Render()
     
-
     def pickPosition(self, obj, event):
         # pick current mouse position
         x,y = self.slice_view.GetEventPosition()  
@@ -359,9 +371,6 @@ class SegmentationModuleTab(QWidget):
         id = vtk.vtkCommand.MouseMoveEvent
         self.slice_view.interactor_style.RemoveObservers(id)  
         self.slice_view.interactor_style.AddObserver("MouseMoveEvent", self.pickPosition)
-
-    def erase(self):
-        return 
 
     def saveChanges(self, path_seg, path_lumen, path_plaque):
         # catch if one side has something to save, other side not
@@ -394,6 +403,8 @@ class SegmentationModuleTab(QWidget):
         header['Segment1_Layer'] = 0
         header['Segment1_Extent'] = '0 119 0 143 0 247'
         segmentation = vtk_to_numpy(self.model_view.label_map.GetPointData().GetScalars())
+        #canvas_img = self.canvas.GetOutputDataObject(0)  # error:'SegmentationModuleTab' object has no attribute 'canvas' -> canvas implemented in line 236, why is it not possible to use?
+        #canvas_array = vtk_to_numpy(canvas_img.GetPointData().GetScalars())  #-> vtkarray needed to convert to numpy array 
         segmentation = segmentation.reshape(x_dim, y_dim, z_dim, order='F')
         nrrd.write(path_seg, segmentation, header)
 
