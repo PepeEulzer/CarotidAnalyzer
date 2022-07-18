@@ -1,12 +1,14 @@
+import os
 from collections import OrderedDict
 import numpy as np
 import nrrd
+from glob import glob
 
 import torch
 from torch.utils.data import Dataset, DataLoader
 from monai.networks.nets import UNet
-# from skimage import morphology
-# from skimage.exposure import rescale_intensity
+from skimage import morphology
+from skimage.exposure import rescale_intensity
 
 
 def init_model(device, weights=None):
@@ -36,27 +38,38 @@ class CarotidDataset(Dataset):
             wl (int): window level for preprocessing
             ww (int): window width for preprocessing
         '''
-        self.test = True
-        if labelpaths:
+        if labelpaths:  # Test data requires no labels
             self.test = False
             assert len(datapaths) == len(labelpaths), 'Data and labels are not matched.'
+        else:
+            self.test = True
         self.datapaths = datapaths
         self.labelpaths = labelpaths
         self.transform = transform
         self.wl = wl
         self.ww = ww
 
+    def _load_nrrd(self, filepath, requires_header=False):
+        if requires_header:
+            data, header = nrrd.read(filepath)
+            return data, header
+        else:
+            data, _ = nrrd.read(filepath)
+        return data
+
+
     def __getitem__(self, idx):
         if not self.test:
-            img, _ = nrrd.read(self.datapaths[idx]) 
-            label, header_label = nrrd.read(self.labelpaths[idx], True)
-            img, label = self._preprocess(img, label, header_label)
+            img = self._load_nrrd(self.datapaths[idx]) 
+            label, header = self._load_nrrd(self.labelpaths[idx], True)
+            img, label = self._preprocess(img, label, header)
         else:
-            img, _ = nrrd.read(self.datapaths[idx])
+            img = self._load_nrrd(self.datapaths[idx])
             img = self._preprocess(img)
-            label = torch.zeros(img.shape)
 
-        # Transform for both images and labels:
+        fname = os.path.basename(self.datapaths[idx]).split('.')[0]
+
+        # Trasnform for both images and labels:
         # if self.transform:
         #     # Random horizontal flipping
         #     if random.random() > 0.5:
@@ -68,12 +81,15 @@ class CarotidDataset(Dataset):
         #         img = TF.vflip(img)
         #         label = TF.vflip(label)
 
-        return img, label
+        if self.test:
+            label = torch.zeros(img.shape)
+        return img, label, fname
 
     def __len__(self):
         return len(self.datapaths)
 
     def _preprocess(self, img, label=None, header=None):
+
         if not self.test:
             if label.shape != img.shape:
                 assert header is not None, 'header is missing'
@@ -81,19 +97,20 @@ class CarotidDataset(Dataset):
                 offset = header['Segmentation_ReferenceImageExtentOffset']
                 label = self._expand_label(img, label, seg_ext0, seg_ext1, offset)  # Expand label to img size
                 label = self._combine_label_channels(label)  # Combine label channels
+
+            # Cropping
             label = self._crop(label)
-        
-        # Cropping
         img = self._crop(img)
         
-        # Windowing
+        # Windowing:
         upper_threshold = self.wl + self.ww//2
         lower_threshold = self.wl - self.ww//2
         img[img<lower_threshold] = lower_threshold
         img[img>upper_threshold] = upper_threshold
 
         # Normalization
-        #img = rescale_intensity(img, out_range=(0, 1))
+        # img = (img / 800 - 0.5) * 2
+        img = rescale_intensity(img, out_range=(0, 1))
 
         if self.test:
             return torch.tensor(img)
@@ -128,11 +145,12 @@ class CarotidDataset(Dataset):
             # Ensure data in bound
             if xb > h0: xb = h0
             if yb > w0: yb = h0
-            if zb > d0: zb = d0 
+            if zb > d0: zb = d0  #label = label[:, :, :-(zb-d0)]
             label_expanded[xa:xb, ya:yb, za:zb] = label
             return label_expanded
         else:
             return label
+
 
     def _combine_label_channels(self, label):
         if len(label.shape) == 4:  # (ch, h, w, d): plaque, lumen
@@ -156,17 +174,16 @@ def post_processing(pred):
     Return:
         pred1 (numpy array)
     '''
-    return pred
-    # binary = pred.copy()
-    # binary[binary>0] = 1  # Combine foreground
-    # labels = morphology.label(binary)  # Identify possible foreground clusters
-    # labels_num = [len(labels[labels==each]) for each in np.unique(labels)]  # Count number of voxels for each cluster
-    # rank = np.argsort(np.argsort(labels_num))  # Argsort1: cluster index sorted by number of voxels, argsort2:
-    # index = list(rank).index(len(rank)-2)
-    # pred1 = pred.copy()
-    # pred1[labels!=index] = 0
-    # pred1 = morphology.opening(pred1)
-    # return pred1
+    binary = pred.copy()
+    binary[binary>0] = 1  # Combine foreground
+    labels = morphology.label(binary)  # Identify possible foreground clusters
+    labels_num = [len(labels[labels==each]) for each in np.unique(labels)]  # Count number of voxels for each cluster
+    rank = np.argsort(np.argsort(labels_num))  # Argsort1: cluster index sorted by number of voxels, argsort2:
+    index = list(rank).index(len(rank)-2)
+    pred1 = pred.copy()
+    pred1[labels!=index] = 0
+    pred1 = morphology.opening(pred1)
+    return pred1
 
 
 def save_prediction(file_name, pred, header):
@@ -174,11 +191,12 @@ def save_prediction(file_name, pred, header):
     nrrd.write(file_name, pred, header)
 
 
-def inference(datapaths, labelpaths, weights, device, wl=415, ww=470):
-    dataset = CarotidDataset(datapaths, labelpaths, wl=wl, ww=ww)
+def inference(datapaths, weights, device, wl=415, ww=470):
+    dataset = CarotidDataset(datapaths, labelpaths=None, wl=wl, ww=ww)
     dataloader = DataLoader(dataset, batch_size=1)
     model = init_model(device, weights).eval()
 
+    i = 0
     for item in dataloader:
         # infer label prediction
         img = item[0].type(torch.FloatTensor).unsqueeze(1).to(device)
@@ -187,10 +205,11 @@ def inference(datapaths, labelpaths, weights, device, wl=415, ww=470):
 
         # postprocess
         pred = post_processing(pred)
+        pred = pred.astype(np.uint8)
         pred = np.rot90(pred, 0, axes=(1, 2))
 
         # create header for prediction nrrd
-        header_img = nrrd.read_header(datapaths[0])
+        header_img = nrrd.read_header(datapaths[i])
         header = OrderedDict()
         header['type'] = 'unsigned char'
         header['dimension'] = 3
@@ -214,11 +233,19 @@ def inference(datapaths, labelpaths, weights, device, wl=415, ww=470):
         header['Segment1_Layer'] = 0
         header['Segment1_Extent'] = '0 119 0 143 0 247'
 
-        save_prediction(f'C:\\Git\\carotid-segmentation\\datasets\\data\\test\\patient_w_018_left.seg.nrrd', pred, header)
+        save_path = datapaths[i]
+        save_path = save_path[:-5] + "_pred.seg" + save_path[-5:]
+        save_prediction(save_path, pred, header)
+        i += 1
 
 def run_inference():
-    print("Running inference!")
-    datapaths = ['C:\\Git\\carotid-segmentation\\datasets\\data\\test\\patient_w_018\\patient_w_018_left.nrrd']
+    #datapaths = ['C:\\Users\\Pepe Eulzer\\Desktop\\pipeline_test\\patient_w_000\\patient_w_000_left.nrrd']
+    datapaths = (glob('C:\\Users\Pepe Eulzer\\Nextcloud\\daten_wei_chan\\patient_?_*\\patient_?_*_left.nrrd') +
+                 glob('C:\\Users\Pepe Eulzer\\Nextcloud\\daten_wei_chan\\patient_?_*\\patient_?_*_right.nrrd'))
     weights = 'C:\\Git\\carotid-segmentation\\models\\best_model2022-03-12.pth'
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
-    inference(datapaths, None, weights, device)
+    print("Running inference! (" + device + ")")
+    inference(datapaths, weights, device)
+
+run_inference()
+print("Done!")
