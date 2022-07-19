@@ -95,6 +95,11 @@ class CarotidAnalyzer(QMainWindow, Ui_MainWindow):
             patient_dict['patient_ID'] = pID
             patient_dict['base_path'] = patient_folder
 
+            # create a models subdir if it does not exist
+            model_path = os.path.join(patient_folder, "models")
+            if not os.path.exists(model_path):
+                os.makedirs(model_path)
+
             def add_if_exists(dict_key, file_tail, models_subdir=False):
                 if models_subdir:
                     path = os.path.join(patient_folder, "models", pID + file_tail)
