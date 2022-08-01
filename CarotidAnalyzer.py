@@ -187,7 +187,43 @@ class CarotidAnalyzer(QMainWindow, Ui_MainWindow):
                 self.segmentation_module.loadPatient(patient)
                 self.centerline_module.loadPatient(patient)
                 self.statusbar.showMessage(patient['patient_ID'])
+                self.__checkSegMatchesModels()
                 break
+
+
+    def __checkSegMatchesModels(self):
+        """
+        Test if a new patient's segmentation matches the model files.
+        They may be out of sync if the segmentation was externally modified.
+        """
+        seg_model_left = self.segmentation_module.segmentation_module_left.model_view.smoother_lumen.GetOutput()
+        cen_model_left = self.centerline_module.centerline_module_left.reader_lumen.GetOutput()
+
+        seg_model_right = self.segmentation_module.segmentation_module_right.model_view.smoother_lumen.GetOutput()
+        cen_model_right = self.centerline_module.centerline_module_right.reader_lumen.GetOutput()
+
+        match = True
+        for models in [[seg_model_left, cen_model_left], [seg_model_right, cen_model_right]]:
+            p0 = models[0].GetNumberOfPolys()
+            p1 = models[1].GetNumberOfPolys()
+            if p0 != p1:
+                print("p0: ", p0)
+                print("p1: ", p1)
+                match = False
+                break
+        
+        if not match:
+            dlg = QMessageBox(self)
+            dlg.setWindowTitle("Warning: Models do not Match")
+            dlg.setText("The segmentation and model files of this patient do not match. " + 
+                        "This is probably due to external modifications to the segmentation. " +
+                        "Do you want to overwrite the model files?")
+            dlg.setStandardButtons(QMessageBox.Ok | QMessageBox.Cancel)
+            button = dlg.exec()
+            if button == QMessageBox.Ok:
+                print("Overwriting model files...")
+                self.segmentation_module.save()
+
 
     
     def viewDataInspector(self, on:bool):

@@ -170,7 +170,19 @@ class IsosurfaceInteractor(QVTKRenderWindowInteractor):
         reader = vmtkscripts.vmtkImageReader()
         reader.InputFileName = path
         reader.Execute()
-        self.label_map = reader.Image
+        #self.label_map = reader.Image
+
+        extent = np.array([0, 120, 0, 144, 0, 248])
+        pad = vtk.vtkImageConstantPad()
+        pad.SetConstant(0)
+        pad.SetInputData(reader.Image)
+        pad.SetOutputWholeExtent(extent)
+        pad.Update()
+        self.label_map = pad.GetOutput()
+
+        # TODO
+        # fix origin
+        # reset origin to image, then set extent?
         
         # convert to check if plaque actor is necessary
         img_to_numpy = vmtkscripts.vmtkImageToNumpy()

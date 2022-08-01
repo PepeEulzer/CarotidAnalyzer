@@ -86,7 +86,9 @@ class CenterlineModuleTab(QWidget):
 
     def loadModels(self, lumen_file, centerline_file):
         if lumen_file:
+            self.reader_lumen.SetFileName("") # forces a reload
             self.reader_lumen.SetFileName(lumen_file)
+            self.reader_lumen.Update()
             self.renderer.AddActor(self.actor_lumen)
             self.lumen_active = True
             if centerline_file:
