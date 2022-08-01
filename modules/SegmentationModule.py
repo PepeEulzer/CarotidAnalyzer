@@ -26,8 +26,10 @@ class SegmentationModuleTab(QWidget):
         self.volume_file = False
         self.pred_file = False
         self.editing_active = False
-        self.brush_size = None  # 0.488281  # get Spacing of image here 
+        self.brush_size = None 
         self.canvas = None
+        self.filter = None
+        self.picker = None
         
         # on-screen objects
         self.CNN_button = QPushButton("New Segmentation: Initialize with CNN")
@@ -90,6 +92,7 @@ class SegmentationModuleTab(QWidget):
             self.model_view.smoother_lumen.GetOutputPort(), COLOR_LUMEN_DARK, COLOR_LUMEN)
         self.plaque_outline_actor3D, self.plaque_outline_actor2D = self.__createOutlineActors(
             self.model_view.smoother_plaque.GetOutputPort(), COLOR_PLAQUE_DARK, COLOR_PLAQUE)
+        self.lut()  # define lookup table to display masks
 
         # connect signals/slots
         self.CNN_button.pressed.connect(self.generateCNNSeg)
@@ -128,6 +131,19 @@ class SegmentationModuleTab(QWidget):
         actor2D.GetProperty().SetColor(color2D)
         actor2D.GetProperty().SetLineWidth(2)
         return actor3D, actor2D
+
+
+    def lut(self):
+        self.lookuptable =vtk.vtkLookupTable() 
+        self.lookuptable.SetNumberOfTableValues(3)
+        self.lookuptable.SetTableRange(0,2)
+        self.lookuptable.SetTableValue(0, 0.0, 0.0, 0.0, 0.0)  # set color of backround (id 0) to black with transparency 0
+        alpha = (0.5,)
+        self.lumen_rgba = COLOR_LUMEN + alpha
+        self.plaque_rgba = COLOR_PLAQUE + alpha  
+        self.lookuptable.SetTableValue(1, self.plaque_rgba)
+        self.lookuptable.SetTableValue(2, self.lumen_rgba)
+        self.lookuptable.Build() 
 
 
     def sliceChanged(self, slice_nr):
@@ -197,7 +213,6 @@ class SegmentationModuleTab(QWidget):
                 self.slice_view.renderer.AddActor(self.plaque_outline_actor2D)
                 self.data_modified.emit()
 
-
     def activateEditing(self):
         # show all buttons that are needed for editing
         self.editing_active = True 
@@ -206,18 +221,6 @@ class SegmentationModuleTab(QWidget):
         self.edit_button.setEnabled(False)
 
         if not self.canvas:  # set up canvas etc if user activates editing for the first time 
-            # define lookup-table for label map -> put label map into canvas
-            self.lookuptable =vtk.vtkLookupTable() 
-            self.lookuptable.SetNumberOfTableValues(3)
-            self.lookuptable.SetTableRange(0,2)
-            self.lookuptable.SetTableValue(0, 0.0, 0.0, 0.0, 0.0)  # set color of backround (id 0) to black with transparency 0
-            alpha = (0.5,)
-            self.lumen_rgba = COLOR_LUMEN + alpha
-            self.plaque_rgba = COLOR_PLAQUE + alpha  
-            self.lookuptable.SetTableValue(1, self.plaque_rgba)
-            self.lookuptable.SetTableValue(2, self.lumen_rgba)
-            self.lookuptable.Build() 
-            
             # define canvas to draw changes of segmentation on 
             self.canvas = vtk.vtkImageCanvasSource2D()
             self.canvas.InitializeCanvasVolume(self.model_view.label_map)
@@ -246,7 +249,12 @@ class SegmentationModuleTab(QWidget):
             circle_mapper.SetInputConnection(self.circle.GetOutputPort())
             self.circle_actor = vtk.vtkActor()
             self.circle_actor.SetMapper(circle_mapper)
-    
+
+            self.filter = self.maskFilter()
+            self.inverseMaskFilter = vtk.vtkImageMask()
+            self.picker = vtk.vtkPropPicker()  # even earlier? (not only when canvas is defined for the first time?)
+            #self.draw = (0,0,0)
+
         self.slice_view.renderer.RemoveActor(self.lumen_outline_actor2D)
         self.slice_view.renderer.RemoveActor(self.plaque_outline_actor2D)
         self.slice_view.renderer.AddActor(self.mask_slice_actor)
@@ -273,6 +281,18 @@ class SegmentationModuleTab(QWidget):
         self.slice_view.renderer.RemoveActor(self.mask_slice_actor)
         self.slice_view.renderer.RemoveActor(self.circle_actor)
         self.slice_view.GetRenderWindow().Render()
+
+    def maskFilter(self):
+        # define blank stencil for drawing 
+        extent = self.image.GetExtent()
+        maskSource = vtk.vtkImageCanvasSource2D()
+        maskSource.SetScalarTypeToUnsignedChar()
+        maskSource.SetNumberOfScalarComponents(1)
+        maskSource.SetExtent(extent)
+        maskSource.SetDrawColor(0, 0, 0)
+        maskSource.FillBox(extent[0],extent[1],extent[2],extent[3])
+        maskSource.Update()
+        return maskSource
 
     def setUpCircle(self): 
         #set up circle to display around cursor and to display brush size  
@@ -301,18 +321,26 @@ class SegmentationModuleTab(QWidget):
         self.lumen_button.setStyleSheet("background-color:rgb(216,101,79)")
         self.plaque_button.setStyleSheet("background-color: light gray")
         self.eraser_button.setStyleSheet("background-color: light gray")
+        self.circle_actor.GetProperty().SetColor(COLOR_LUMEN)  # set color of circle to lumen 
+        self.inverseMaskFilter.SetMaskedOutputValue(2)
 
     def setColorPlaque(self):
         self.canvas.SetDrawColor(1)
         self.lumen_button.setStyleSheet("background-color: light gray")
         self.plaque_button.setStyleSheet("background-color: rgb(241,214,145)")
         self.eraser_button.setStyleSheet("background-color: light gray")
+        self.circle_actor.GetProperty().SetColor(COLOR_PLAQUE)  # set color of circle to plaque 
+        self.inverseMaskFilter.SetMaskedOutputValue(1)  # (241,214,145)
+
 
     def erase(self):
         self.canvas.SetDrawColor(0) 
         self.lumen_button.setStyleSheet("background-color: light gray")
         self.plaque_button.setStyleSheet("background-color: light gray")
         self.eraser_button.setStyleSheet("background-color: rgb(50,50,50)")
+        self.circle_actor.GetProperty().SetColor(1,1,1)   # show circle in white (is like this in the moment)
+        self.inverseMaskFilter.SetMaskedOutputValue(0)
+
     
     def drawMode(self):  
         self.slice_view.interactor_style.AddObserver("MouseMoveEvent", self.pickPosition)
@@ -328,9 +356,9 @@ class SegmentationModuleTab(QWidget):
     def pickPosition(self, obj, event):
         # pick current mouse position
         x,y = self.slice_view.GetEventPosition()  
-        picker = vtk.vtkPropPicker()
-        picker.Pick(x,y,self.slice_view.slice,self.slice_view.renderer) 
-        position = picker.GetPickPosition()  # world coordinates 
+        #picker = vtk.vtkPropPicker()
+        self.picker.Pick(x,y,self.slice_view.slice,self.slice_view.renderer) 
+        position = self.picker.GetPickPosition()  # world coordinates 
         origin = self.image.GetOrigin()
         self.imgPos = ((position[0]-origin[0])/self.image.GetSpacing()[0], 
                        (position[1]-origin[1])/self.image.GetSpacing()[1], 
@@ -341,17 +369,57 @@ class SegmentationModuleTab(QWidget):
         self.slice_view.GetRenderWindow().Render()
 
     def start_draw(self, obj, event):
-        self.draw(obj, event)  # draw first point at posttion clicked on 
+        #self.draw(obj, event)  # draw first point at posttion clicked on 
+        self.draw(obj,event)
         # draw as long as left mouse button pressed down 
+        #self.slice_view.interactor_style.AddObserver("MouseMoveEvent", self.draw)
         self.slice_view.interactor_style.AddObserver("MouseMoveEvent", self.draw)  
         self.slice_view.interactor_style.AddObserver("LeftButtonReleaseEvent", self.end_draw)
     
-    def draw(self, object, event):
+    """def draw(self, object, event):
         x = vtk.vtkMath.Round(self.imgPos[0])
         y = vtk.vtkMath.Round(self.imgPos[1])
         s = self.brush_size
         self.canvas.DrawCircle(x, y, s)  # for bigger circles not everything filled out
+        self.slice_view.GetRenderWindow().Render()"""
+
+    def draw(self, object, event):
+        #self.filter = self.maskFilter()
+        extent = self.image.GetExtent()  
+        x = vtk.vtkMath.Round(self.imgPos[0])
+        y = vtk.vtkMath.Round(self.imgPos[1])
+        s = self.brush_size
+        self.filter.SetDrawColor(0, 0, 0)
+        self.filter.FillBox(extent[0],extent[1],extent[2],extent[3])
+        self.filter.SetDrawColor(255,255,255)
+        self.filter.DrawCircle(x,y,s)
+        self.filter.FillPixel(x,y)
+        self.filter.Update()
+
+        #source = self.mask_slice_mapper.GetOutputPort()
+        #self.inverseMaskFilter = vtk.vtkImageMask()
+        self.inverseMaskFilter.SetInputConnection(0,self.canvas.GetOutputPort())  # source: output from image slice mapper? 
+        """
+        - is there a method to get a ceratain slice of the canvas via mapper or via imagecanvas2D (probably not)
+        OR
+        instead of Setting 0. Input as canvas slice it before usage --> reslice (https://vtk.org/doc/nightly/html/classvtkImageReslice.html)
+        3) extract slices of image volume 
+        Methods in Doc: - SetResliceAxesDirectionCosines() with set outputdimension(2)
+                        - SetResliceAxesOrigin()
+        """
+        self.inverseMaskFilter.SetInputConnection(1,self.filter.GetOutputPort())
+        self.inverseMaskFilter.NotMaskOn()
+        self.inverseMaskFilter.Update()  
+        
+        #origin_x = vtk.vtkMath.Round(self.image.GetOrigin()[0])
+        #origin_y = vtk.vtkMath.Round(self.image.GetOrigin()[1])
+        #self.canvas.DrawImage(origin_x,origin_y, self.inverseMaskFilter.GetOutput(0))  # sth has to go wrong here (mask disappears from right position when drawn on canvas)
+        self.canvas.DrawImage(0,0, self.inverseMaskFilter.GetOutput(0))  # not working with origin --> WHY? (origin != 0,0 ??)
         self.slice_view.GetRenderWindow().Render()
+        
+        # reset filter 
+        self.filter.SetDrawColor(0, 0, 0)
+        self.filter.FillBox(extent[0],extent[1],extent[2],extent[3])
     
     def end_draw(self, obj, event):
         id = vtk.vtkCommand.MouseMoveEvent
