@@ -165,7 +165,7 @@ class SegmentationModuleTab(QWidget):
             self.image = None
         
         if seg_file:
-            self.model_view.loadNrrd(seg_file)
+            self.model_view.loadNrrd(seg_file, self.image)
             self.model_view.renderer.AddActor(self.lumen_outline_actor3D)
             self.slice_view.renderer.AddActor(self.lumen_outline_actor2D)
             self.model_view.renderer.AddActor(self.plaque_outline_actor3D)
@@ -365,17 +365,22 @@ class SegmentationModuleTab(QWidget):
             return
 
         # save segmentation nrrd
-        header_img = nrrd.read_header(self.volume_file)
+        spacing = self.image.GetSpacing()
+        origin = self.image.GetOrigin()
+
+        #header_img = nrrd.read_header(self.volume_file)
         header = OrderedDict()
         header['type'] = 'unsigned char'
         header['dimension'] = 3
         header['space'] = 'left-posterior-superior'
         header['sizes'] = '120 144 248' # fixed model size
-        header['space directions'] = header_img['space directions']
+        header['space directions'] = [[-spacing[0], 0, 0], [0, -spacing[1], 0], [0, 0, spacing[2]]] #header_img['space directions']
+        print(header['space directions'])
         header['kinds'] = ['domain', 'domain', 'domain']
         header['endian'] = 'little'
         header['encoding'] = 'gzip'
-        header['space origin'] = header_img['space origin']
+        header['space origin'] = [-origin[0], -origin[1], origin[2]]#header_img['space origin']
+        print(header['space origin'])
         header['Segment0_ID'] = 'Segment_1'
         header['Segment0_Name'] = 'plaque'
         header['Segment0_Color'] = str(241/255) + ' ' + str(214/255) + ' ' + str(145/255)

@@ -165,24 +165,37 @@ class IsosurfaceInteractor(QVTKRenderWindowInteractor):
         cam.SetViewUp(0, -1, 0)
 
 
-    def loadNrrd(self, path):
+    def loadNrrd(self, path, src_image=None):
         # read the file
         reader = vmtkscripts.vmtkImageReader()
         reader.InputFileName = path
         reader.Execute()
-        #self.label_map = reader.Image
 
-        extent = np.array([0, 120, 0, 144, 0, 248])
-        pad = vtk.vtkImageConstantPad()
-        pad.SetConstant(0)
-        pad.SetInputData(reader.Image)
-        pad.SetOutputWholeExtent(extent)
-        pad.Update()
-        self.label_map = pad.GetOutput()
-
-        # TODO
-        # fix origin
-        # reset origin to image, then set extent?
+        # Set the extent of the labelmap to the fixed model size (120, 144, 248).
+        # Uses the source image (CTA volume) to position the labelmap.
+        # Assumes the labelmap extent and origin to be within the source image.
+        if src_image is not None:
+            label_origin = reader.Image.GetOrigin()
+            src_origin = src_image.GetOrigin()
+            src_spacing = src_image.GetSpacing()
+            x_offset = int(abs(round((src_origin[0] - label_origin[0]) / src_spacing[0])))
+            y_offset = int(abs(round((src_origin[1] - label_origin[1]) / src_spacing[1])))
+            z_offset = int(abs(round((src_origin[2] - label_origin[2]) / src_spacing[2])))
+            extent = np.array([-x_offset, 120-x_offset, -y_offset, 144-y_offset, -z_offset, 248-z_offset])
+            print(src_origin)
+            print(label_origin)
+            print(extent)
+            pad = vtk.vtkImageConstantPad()
+            pad.SetConstant(0)
+            pad.SetInputData(reader.Image)
+            pad.SetOutputWholeExtent(extent)
+            pad.Update()
+            self.label_map = pad.GetOutput()
+            self.label_map.SetOrigin(src_origin)
+            self.label_map.SetExtent(0, 120, 0, 144, 0, 248)
+        else:
+            self.label_map = reader.Image
+        
         
         # convert to check if plaque actor is necessary
         img_to_numpy = vmtkscripts.vmtkImageToNumpy()
