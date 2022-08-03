@@ -204,11 +204,9 @@ class CarotidAnalyzer(QMainWindow, Ui_MainWindow):
 
         match = True
         for models in [[seg_model_left, cen_model_left], [seg_model_right, cen_model_right]]:
-            p0 = models[0].GetNumberOfPolys()
-            p1 = models[1].GetNumberOfPolys()
+            p0 = models[0].GetNumberOfPoints()
+            p1 = models[1].GetNumberOfPoints()
             if p0 != p1:
-                print("p0: ", p0)
-                print("p1: ", p1)
                 match = False
                 break
         

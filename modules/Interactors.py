@@ -181,10 +181,7 @@ class IsosurfaceInteractor(QVTKRenderWindowInteractor):
             x_offset = int(abs(round((src_origin[0] - label_origin[0]) / src_spacing[0])))
             y_offset = int(abs(round((src_origin[1] - label_origin[1]) / src_spacing[1])))
             z_offset = int(abs(round((src_origin[2] - label_origin[2]) / src_spacing[2])))
-            extent = np.array([-x_offset, 120-x_offset, -y_offset, 144-y_offset, -z_offset, 248-z_offset])
-            print(src_origin)
-            print(label_origin)
-            print(extent)
+            extent = np.array([-x_offset, 119-x_offset, -y_offset, 143-y_offset, -z_offset, 247-z_offset])
             pad = vtk.vtkImageConstantPad()
             pad.SetConstant(0)
             pad.SetInputData(reader.Image)
@@ -192,7 +189,7 @@ class IsosurfaceInteractor(QVTKRenderWindowInteractor):
             pad.Update()
             self.label_map = pad.GetOutput()
             self.label_map.SetOrigin(src_origin)
-            self.label_map.SetExtent(0, 120, 0, 144, 0, 248)
+            self.label_map.SetExtent(0, 119, 0, 143, 0, 247)
         else:
             self.label_map = reader.Image
         

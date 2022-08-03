@@ -364,23 +364,18 @@ class SegmentationModuleTab(QWidget):
         if x_dim == 0 or y_dim == 0 or z_dim == 0:
             return
 
-        # save segmentation nrrd
-        spacing = self.image.GetSpacing()
-        origin = self.image.GetOrigin()
-
-        #header_img = nrrd.read_header(self.volume_file)
+        # save segmentation nrrd (geometry based on image volume)
+        header_img = nrrd.read_header(self.volume_file)
         header = OrderedDict()
         header['type'] = 'unsigned char'
         header['dimension'] = 3
         header['space'] = 'left-posterior-superior'
         header['sizes'] = '120 144 248' # fixed model size
-        header['space directions'] = [[-spacing[0], 0, 0], [0, -spacing[1], 0], [0, 0, spacing[2]]] #header_img['space directions']
-        print(header['space directions'])
+        header['space directions'] = header_img['space directions']
         header['kinds'] = ['domain', 'domain', 'domain']
         header['endian'] = 'little'
         header['encoding'] = 'gzip'
-        header['space origin'] = [-origin[0], -origin[1], origin[2]]#header_img['space origin']
-        print(header['space origin'])
+        header['space origin'] = header_img['space origin']
         header['Segment0_ID'] = 'Segment_1'
         header['Segment0_Name'] = 'plaque'
         header['Segment0_Color'] = str(241/255) + ' ' + str(214/255) + ' ' + str(145/255)
@@ -394,8 +389,6 @@ class SegmentationModuleTab(QWidget):
         header['Segment1_Layer'] = 0
         header['Segment1_Extent'] = '0 119 0 143 0 247'
         segmentation = vtk_to_numpy(self.model_view.label_map.GetPointData().GetScalars())
-        #canvas_img = self.canvas.GetOutputDataObject(0)  # error:'SegmentationModuleTab' object has no attribute 'canvas' -> canvas implemented in line 236, why is it not possible to use?
-        #canvas_array = vtk_to_numpy(canvas_img.GetPointData().GetScalars())  #-> vtkarray needed to convert to numpy array 
         segmentation = segmentation.reshape(x_dim, y_dim, z_dim, order='F')
         nrrd.write(path_seg, segmentation, header)
 
