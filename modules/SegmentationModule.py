@@ -310,6 +310,7 @@ class SegmentationModuleTab(QWidget):
         self.mask_slice_mapper.SetSliceNumber(slice_nr)  
         self.slice_view.GetRenderWindow().Render()
 
+
     def brushSizeChanged(self, brush_size):
         # change size of drawing on canvas 
         self.brush_size = brush_size*self.image.GetSpacing()[0]  
@@ -369,7 +370,7 @@ class SegmentationModuleTab(QWidget):
         self.slice_view.GetRenderWindow().Render()
 
     def start_draw(self, obj, event):
-        #self.draw(obj, event)  # draw first point at posttion clicked on 
+        #self.draw(obj, event)  # draw first point at postition clicked on 
         self.draw(obj,event)
         # draw as long as left mouse button pressed down 
         #self.slice_view.interactor_style.AddObserver("MouseMoveEvent", self.draw)
@@ -384,6 +385,7 @@ class SegmentationModuleTab(QWidget):
         self.slice_view.GetRenderWindow().Render()"""
 
     def draw(self, object, event):
+        ##################################### slicer maybe outside?, more things outside?
         #self.filter = self.maskFilter()
         extent = self.image.GetExtent()  
         x = vtk.vtkMath.Round(self.imgPos[0])
@@ -395,25 +397,16 @@ class SegmentationModuleTab(QWidget):
         self.filter.DrawCircle(x,y,s)
         self.filter.FillPixel(x,y)
         self.filter.Update()
-
-        #source = self.mask_slice_mapper.GetOutputPort()
-        #self.inverseMaskFilter = vtk.vtkImageMask()
-        self.inverseMaskFilter.SetInputConnection(0,self.canvas.GetOutputPort())  # source: output from image slice mapper? 
-        """
-        - is there a method to get a ceratain slice of the canvas via mapper or via imagecanvas2D (probably not)
-        OR
-        instead of Setting 0. Input as canvas slice it before usage --> reslice (https://vtk.org/doc/nightly/html/classvtkImageReslice.html)
-        3) extract slices of image volume 
-        Methods in Doc: - SetResliceAxesDirectionCosines() with set outputdimension(2)
-                        - SetResliceAxesOrigin()
-        """
+        
+        ## to-do: instead of replacing whole slice only extract part around circle and put this into canvas 
+        slicer = vtk.vtkImageReslice()
+        slicer.SetInputConnection(self.canvas.GetOutputPort())
+        slicer.SetOutputDimensionality(2)
+        slicer.SetResliceAxesOrigin(x,y, self.canvas.GetDefaultZ())  
+        self.inverseMaskFilter.SetInputConnection(0, slicer.GetOutputPort())
         self.inverseMaskFilter.SetInputConnection(1,self.filter.GetOutputPort())
         self.inverseMaskFilter.NotMaskOn()
         self.inverseMaskFilter.Update()  
-        
-        #origin_x = vtk.vtkMath.Round(self.image.GetOrigin()[0])
-        #origin_y = vtk.vtkMath.Round(self.image.GetOrigin()[1])
-        #self.canvas.DrawImage(origin_x,origin_y, self.inverseMaskFilter.GetOutput(0))  # sth has to go wrong here (mask disappears from right position when drawn on canvas)
         self.canvas.DrawImage(0,0, self.inverseMaskFilter.GetOutput(0))  # not working with origin --> WHY? (origin != 0,0 ??)
         self.slice_view.GetRenderWindow().Render()
         
