@@ -7,7 +7,7 @@ from vtk.util.numpy_support import vtk_to_numpy
 from PyQt5.QtCore import Qt, pyqtSignal
 from PyQt5.QtWidgets import  (
     QWidget, QVBoxLayout, QHBoxLayout, QSlider, QTabWidget,
-    QPushButton, QMessageBox, QGridLayout, QLabel, QGroupBox
+    QPushButton, QMessageBox, QGridLayout, QLabel
 )
 
 from modules.Interactors import ImageSliceInteractor, IsosurfaceInteractor
@@ -171,11 +171,11 @@ class SegmentationModuleTab(QWidget):
             self.model_view.renderer.AddActor(self.plaque_outline_actor3D)
             self.slice_view.renderer.AddActor(self.plaque_outline_actor2D)
         else:
-            self.model_view.reset()
             self.model_view.renderer.RemoveActor(self.lumen_outline_actor3D)
             self.slice_view.renderer.RemoveActor(self.lumen_outline_actor2D)
             self.model_view.renderer.RemoveActor(self.plaque_outline_actor3D)
             self.slice_view.renderer.RemoveActor(self.plaque_outline_actor2D)
+            self.model_view.reset()
 
 
     def generateCNNSeg(self):
@@ -424,6 +424,9 @@ class SegmentationModule(QTabWidget):
         self.segmentation_module_left = SegmentationModuleTab()
         self.segmentation_module_right = SegmentationModuleTab()
 
+        self.segmentation_module_left.data_modified.connect(self.dataModifiedLeft)
+        self.segmentation_module_right.data_modified.connect(self.dataModifiedRight)
+
         self.addTab(self.segmentation_module_right, "Right")
         self.addTab(self.segmentation_module_left, "Left")
 
@@ -436,8 +439,18 @@ class SegmentationModule(QTabWidget):
             patient_dict['volume_left'], patient_dict['seg_left'], patient_dict['seg_left_pred'])
 
 
+    def dataModifiedRight(self):
+        self.setTabText(0, "Right " + SYM_UNSAVED_CHANGES)
+
+
+    def dataModifiedLeft(self):
+        self.setTabText(1, "Left " + SYM_UNSAVED_CHANGES)
+
+
     def discard(self):
         self.loadPatient(self.patient_dict)
+        self.setTabText(0, "Right")
+        self.setTabText(1, "Left")
 
 
     def save(self):
@@ -453,6 +466,9 @@ class SegmentationModule(QTabWidget):
         path_lumen = os.path.join(base_path, "models", patient_ID + "_left_lumen.stl")
         path_plaque = os.path.join(base_path, "models", patient_ID + "_left_plaque.stl")
         self.segmentation_module_left.saveChanges(path_seg, path_lumen, path_plaque)
+
+        self.setTabText(0, "Right")
+        self.setTabText(1, "Left")
 
         self.new_segmentation.emit()
         self.new_models.emit()

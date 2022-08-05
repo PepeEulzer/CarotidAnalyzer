@@ -19,6 +19,7 @@ class CarotidAnalyzer(QMainWindow, Ui_MainWindow):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setupUi(self)
+        self.tree_widget_data.setExpandsOnDoubleClick(False)
 
         # state
         self.unsaved_changes = False
@@ -56,6 +57,7 @@ class CarotidAnalyzer(QMainWindow, Ui_MainWindow):
         self.action_save_and_propagate.triggered.connect(self.saveAndPropagate)
         self.action_quit.triggered.connect(self.close)
         self.button_load_file.clicked.connect(self.loadSelectedPatient)
+        self.tree_widget_data.itemDoubleClicked.connect(self.loadSelectedPatient)
 
         self.centerline_module.centerline_module_left.data_modified.connect(self.changesMade)
         self.centerline_module.centerline_module_right.data_modified.connect(self.changesMade)
@@ -151,10 +153,6 @@ class CarotidAnalyzer(QMainWindow, Ui_MainWindow):
             entry_centerlines[2] = SYM_YES if patient_dict["centerlines_right"] else SYM_NO
 
             entry_patient = QTreeWidgetItem([pID, "", ""])
-            background_color = QColor(240, 240, 240)
-            entry_patient.setBackground(0, background_color)
-            entry_patient.setBackground(1, background_color)
-            entry_patient.setBackground(2, background_color)
             entry_patient.addChild(QTreeWidgetItem(entry_volume))
             entry_patient.addChild(QTreeWidgetItem(entry_seg))
             entry_patient.addChild(QTreeWidgetItem(entry_lumen))
@@ -172,11 +170,27 @@ class CarotidAnalyzer(QMainWindow, Ui_MainWindow):
         if len(dir) > 0:
             self.setWorkingDir(dir)
 
+    def setPatientTreeItemColor(self, item, color):
+        if item is None:
+            return
+        c = QColor(color[0], color[1], color[2])
+        for i in range(3):
+            item.setBackground(i, c)
+        for i in range(item.childCount()):
+            for j in range(3):
+                item.child(i).setBackground(j, c)
 
     def loadSelectedPatient(self):
+        # get top parent item
         selected = self.tree_widget_data.currentItem()
         while selected.parent() != None:
             selected = selected.parent()
+
+        # set colors of last and current item
+        self.setPatientTreeItemColor(self.active_patient_tree_widget_item, COLOR_UNSELECTED)
+        self.setPatientTreeItemColor(selected, COLOR_SELECTED)
+
+        # save selected item, load new patient
         self.active_patient_tree_widget_item = selected
         patient_ID = selected.text(0)
         for patient in self.patient_data:
@@ -186,7 +200,6 @@ class CarotidAnalyzer(QMainWindow, Ui_MainWindow):
                 self.crop_module.loadPatient(patient)
                 self.segmentation_module.loadPatient(patient)
                 self.centerline_module.loadPatient(patient)
-                self.statusbar.showMessage(patient['patient_ID'])
                 self.__checkSegMatchesModels()
                 break
 
@@ -267,9 +280,17 @@ class CarotidAnalyzer(QMainWindow, Ui_MainWindow):
         else:
             self.module_stack.setCurrentWidget(self.empty_module)
 
+    
+    def setModulesClickable(self, state:bool):
+        self.action_crop_module.setEnabled(state)
+        self.action_segmentation_module.setEnabled(state)
+        self.action_centerline_module.setEnabled(state)
+        self.action_stenosis_classifier.setEnabled(state)
+
 
     def changesMade(self):
         self.unsaved_changes = True
+        self.setModulesClickable(False)
         self.action_discard_changes.setEnabled(True)
         self.action_save_and_propagate.setEnabled(True)
     
@@ -279,6 +300,7 @@ class CarotidAnalyzer(QMainWindow, Ui_MainWindow):
         self.action_discard_changes.setEnabled(False)
         self.action_save_and_propagate.setEnabled(False)
         self.unsaved_changes = False
+        self.setModulesClickable(True)
 
     
     def saveAndPropagate(self):
@@ -288,6 +310,7 @@ class CarotidAnalyzer(QMainWindow, Ui_MainWindow):
         self.action_discard_changes.setEnabled(False)
         self.action_save_and_propagate.setEnabled(False)
         self.unsaved_changes = False
+        self.setModulesClickable(True)
 
 
     def newSegmentation(self):

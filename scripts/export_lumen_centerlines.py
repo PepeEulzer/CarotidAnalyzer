@@ -9,7 +9,7 @@ for use in CFD modelling.
 Requires VTK >= 8.2 (obj writer).
 """
 
-src_folder = 'C:/Users/Pepe Eulzer/Nextcloud/daten_wei_chan'
+src_folder = 'C:/Users/Pepe Eulzer/Nextcloud/carotis_data'
 dst_folder = 'C:/Users/Pepe Eulzer/Desktop/daten_kevin'
 
 # iterate patients

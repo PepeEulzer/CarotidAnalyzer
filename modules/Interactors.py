@@ -1,3 +1,5 @@
+import os
+
 import numpy as np
 import vtk
 from PyQt5.QtCore import pyqtSignal
@@ -30,8 +32,14 @@ class ImageSliceInteractor(QVTKRenderWindowInteractor):
         self.image_actor = vtk.vtkImageActor()
         self.image_actor.SetMapper(self.image_mapper)
 
+        self.text_patient = vtk.vtkTextActor()
+        self.text_patient.SetInput("No file found.")
+        self.text_patient.SetDisplayPosition(10, 10)
+        self.text_patient.GetTextProperty().SetFontSize(20)
+
         self.renderer = vtk.vtkRenderer()
         self.renderer.SetBackground(0,0,0)
+        self.renderer.AddActor(self.text_patient)
         cam = self.renderer.GetActiveCamera()
         cam.ParallelProjectionOn()
         cam.SetPosition(0, 0, -100)
@@ -78,6 +86,9 @@ class ImageSliceInteractor(QVTKRenderWindowInteractor):
         self.max_slice = self.image_mapper.GetSliceNumberMaxValue()
         self.slice = self.min_slice
 
+        # set file text
+        self.text_patient.SetInput(os.path.basename(path)[:-5])
+
         # re-focus the camera
         self.renderer.AddActor(self.image_actor)
         self.renderer.ResetCamera()
@@ -103,6 +114,7 @@ class ImageSliceInteractor(QVTKRenderWindowInteractor):
     
     def reset(self):
         self.renderer.RemoveActor(self.image_actor)
+        self.text_patient.SetInput("No file found.")
         self.min_slice = 0
         self.max_slice = 0
         self.slice = 0

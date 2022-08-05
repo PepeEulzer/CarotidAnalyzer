@@ -240,8 +240,8 @@ def inference(datapaths, weights, device, wl=415, ww=470):
 
 def run_inference():
     #datapaths = ['C:\\Users\\Pepe Eulzer\\Desktop\\pipeline_test\\patient_w_000\\patient_w_000_left.nrrd']
-    datapaths = (glob('C:\\Users\Pepe Eulzer\\Nextcloud\\daten_wei_chan\\patient_?_*\\patient_?_*_left.nrrd') +
-                 glob('C:\\Users\Pepe Eulzer\\Nextcloud\\daten_wei_chan\\patient_?_*\\patient_?_*_right.nrrd'))
+    datapaths = (glob('C:\\Users\Pepe Eulzer\\Desktop\\carotis_test_data\\patient_?_*\\patient_?_*_left.nrrd') +
+                 glob('C:\\Users\Pepe Eulzer\\Desktop\\carotis_test_data\\patient_?_*\\patient_?_*_right.nrrd'))
     weights = 'C:\\Git\\carotid-segmentation\\models\\best_model2022-03-12.pth'
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
     print("Running inference! (" + device + ")")
