@@ -84,7 +84,7 @@ class ImageSliceInteractor(QVTKRenderWindowInteractor):
         self.image_mapper.SetInputData(image)
         self.min_slice = self.image_mapper.GetSliceNumberMinValue()
         self.max_slice = self.image_mapper.GetSliceNumberMaxValue()
-        self.slice = self.min_slice
+        self.setSlice(self.min_slice)
 
         # set file text
         self.text_patient.SetInput(os.path.basename(path)[:-5])
@@ -103,7 +103,7 @@ class ImageSliceInteractor(QVTKRenderWindowInteractor):
         self.image_mapper.SetInputData(image)
         self.min_slice = self.image_mapper.GetSliceNumberMinValue()
         self.max_slice = self.image_mapper.GetSliceNumberMaxValue()
-        self.slice = self.min_slice
+        self.setSlice(self.min_slice)
 
         # re-focus the camera
         self.renderer.AddActor(self.image_actor)

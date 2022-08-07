@@ -224,6 +224,7 @@ class SegmentationModuleTab(QWidget):
             self.canvas.SetDefaultZ(self.slice_view.slice)
             self.canvas.Update()
 
+            # map 2D display through colormap
             self.masks_color_mapped = vtk.vtkImageMapToColors() 
             self.masks_color_mapped.SetLookupTable(self.lookuptable) 
             self.masks_color_mapped.PassAlphaToOutputOn()
@@ -357,6 +358,11 @@ class SegmentationModuleTab(QWidget):
         id = vtk.vtkCommand.MouseMoveEvent
         self.slice_view.interactor_style.RemoveObservers(id)  
         self.slice_view.interactor_style.AddObserver("MouseMoveEvent", self.pickPosition)
+
+        # update the label map and 3D display
+        self.model_view.label_map = self.canvas.GetOutput()
+        self.model_view.padding.SetInputData(self.model_view.label_map)
+        self.model_view.GetRenderWindow().Render()
 
     def saveChanges(self, path_seg, path_lumen, path_plaque):
         # catch if one side has something to save, other side not
