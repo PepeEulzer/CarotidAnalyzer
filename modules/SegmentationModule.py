@@ -1,9 +1,10 @@
 import os
 from collections import OrderedDict
 
+import numpy as np
 import nrrd
 import vtk
-from vtk.util.numpy_support import vtk_to_numpy
+from vtk.util.numpy_support import vtk_to_numpy, numpy_to_vtk
 from PyQt5.QtCore import Qt, pyqtSignal
 from PyQt5.QtWidgets import  (
     QWidget, QVBoxLayout, QHBoxLayout, QSlider, QTabWidget,
@@ -69,7 +70,6 @@ class SegmentationModuleTab(QWidget):
         self.slice_view_layout.addWidget(self.slice_view_slider)
         self.slice_view_layout.addWidget(self.slice_view)
 
-        #self.edit_buttons_layout = QVBoxLayout()
         self.edit_buttons_layout = QGridLayout()
         self.edit_buttons_layout.setVerticalSpacing(30)  
         self.edit_buttons_layout.addWidget(self.brush_button, 0,0,1,2) 
@@ -101,9 +101,9 @@ class SegmentationModuleTab(QWidget):
         self.slice_view_slider.valueChanged[int].connect(self.setSliceEditor)
         self.edit_button.pressed.connect(self.activateEditing)
         self.brush_button.pressed.connect(self.drawMode)  # put elsewhere? 
-        self.eraser_button.pressed.connect(self.erase)
         self.brush_size_slider.valueChanged[int].connect(self.brushSizeChanged)
         self.stop_editing_button.pressed.connect(self.inactivateEditing)
+        self.eraser_button.pressed.connect(self.setColorErase)
         self.lumen_button.pressed.connect(self.setColorLumen)  
         self.plaque_button.pressed.connect(self.setColorPlaque)
 
@@ -222,15 +222,15 @@ class SegmentationModuleTab(QWidget):
 
         if not self.canvas:  # set up canvas etc if user activates editing for the first time 
             # define canvas to draw changes of segmentation on 
-            self.canvas = vtk.vtkImageCanvasSource2D()
-            self.canvas.InitializeCanvasVolume(self.model_view.label_map)
-            self.canvas.SetDefaultZ(self.slice_view.slice)
-            self.canvas.Update()
+            shape = self.model_view.label_map.GetDimensions()
+            self.segmentation = vtk_to_numpy(self.model_view.label_map.GetPointData().GetScalars())
+            self.segmentation = self.segmentation.reshape(shape, order='F')
+            self.draw_value = 0
 
             self.masks_color_mapped = vtk.vtkImageMapToColors() 
             self.masks_color_mapped.SetLookupTable(self.lookuptable) 
             self.masks_color_mapped.PassAlphaToOutputOn()
-            self.masks_color_mapped.SetInputConnection(self.canvas.GetOutputPort())
+            self.masks_color_mapped.SetInputData(self.model_view.label_map)
             
             self.mask_slice_mapper = vtk.vtkOpenGLImageSliceMapper()
             self.mask_slice_mapper.SetInputConnection(self.masks_color_mapped.GetOutputPort())
@@ -239,9 +239,6 @@ class SegmentationModuleTab(QWidget):
             self.mask_slice_actor = vtk.vtkImageActor()
             self.mask_slice_actor.SetMapper(self.mask_slice_mapper)
             self.mask_slice_actor.InterpolateOff()
-            pos = self.model_view.label_map.GetOrigin()
-            self.mask_slice_actor.SetPosition(pos[0], pos[1], pos[2] - 0.01)
-            self.mask_slice_actor.SetScale(self.model_view.label_map.GetSpacing())
         
             # circle around mouse when drawing 
             self.circle = self.setUpCircle()
@@ -253,7 +250,7 @@ class SegmentationModuleTab(QWidget):
             self.filter = self.maskFilter()
             self.inverseMaskFilter = vtk.vtkImageMask()
             self.picker = vtk.vtkPropPicker()  # even earlier? (not only when canvas is defined for the first time?)
-            #self.draw = (0,0,0)
+            self.brushSizeChanged(1)
 
         self.slice_view.renderer.RemoveActor(self.lumen_outline_actor2D)
         self.slice_view.renderer.RemoveActor(self.plaque_outline_actor2D)
@@ -306,19 +303,26 @@ class SegmentationModuleTab(QWidget):
         # connect mask slices to current image slice
         if not self.editing_active:
             return   
-        self.canvas.SetDefaultZ(slice_nr)  
         self.mask_slice_mapper.SetSliceNumber(slice_nr)  
         self.slice_view.GetRenderWindow().Render()
 
 
     def brushSizeChanged(self, brush_size):
         # change size of drawing on canvas 
-        self.brush_size = brush_size*self.image.GetSpacing()[0]  
-        self.circle.SetRadius(self.brush_size*self.image.GetSpacing()[0])  
+        self.brush_size = int(round(brush_size*self.image.GetSpacing()[0]))
+        self.circle.SetRadius(self.brush_size*self.image.GetSpacing()[0])
+
+        # create circle mask
+        axis = np.arange(-self.brush_size, self.brush_size+1, 1)
+        X, Y = np.meshgrid(axis, axis)
+        R = X**2 + Y**2
+        R[R < self.brush_size**2] = 1
+        R[R > 1] = 0
+        self.circle_mask = R.astype(np.bool_)
         self.slice_view.GetRenderWindow().Render()
 
     def setColorLumen(self):
-        self.canvas.SetDrawColor(2) 
+        self.draw_value = 2
         self.lumen_button.setStyleSheet("background-color:rgb(216,101,79)")
         self.plaque_button.setStyleSheet("background-color: light gray")
         self.eraser_button.setStyleSheet("background-color: light gray")
@@ -326,7 +330,7 @@ class SegmentationModuleTab(QWidget):
         self.inverseMaskFilter.SetMaskedOutputValue(2)
 
     def setColorPlaque(self):
-        self.canvas.SetDrawColor(1)
+        self.draw_value = 1
         self.lumen_button.setStyleSheet("background-color: light gray")
         self.plaque_button.setStyleSheet("background-color: rgb(241,214,145)")
         self.eraser_button.setStyleSheet("background-color: light gray")
@@ -334,8 +338,8 @@ class SegmentationModuleTab(QWidget):
         self.inverseMaskFilter.SetMaskedOutputValue(1)  # (241,214,145)
 
 
-    def erase(self):
-        self.canvas.SetDrawColor(0) 
+    def setColorErase(self):
+        self.draw_value = 0
         self.lumen_button.setStyleSheet("background-color: light gray")
         self.plaque_button.setStyleSheet("background-color: light gray")
         self.eraser_button.setStyleSheet("background-color: rgb(50,50,50)")
@@ -354,10 +358,10 @@ class SegmentationModuleTab(QWidget):
         self.slice_view.renderer.AddActor(self.circle_actor)  
         self.slice_view.GetRenderWindow().Render()
     
+
     def pickPosition(self, obj, event):
         # pick current mouse position
         x,y = self.slice_view.GetEventPosition()  
-        #picker = vtk.vtkPropPicker()
         self.picker.Pick(x,y,self.slice_view.slice,self.slice_view.renderer) 
         position = self.picker.GetPickPosition()  # world coordinates 
         origin = self.image.GetOrigin()
@@ -369,55 +373,43 @@ class SegmentationModuleTab(QWidget):
                               self.image.GetOrigin()[2]-self.image.GetExtent()[2])  # move circle if mouse moved 
         self.slice_view.GetRenderWindow().Render()
 
+
     def start_draw(self, obj, event):
-        #self.draw(obj, event)  # draw first point at postition clicked on 
+        # draw first point at position clicked on 
         self.draw(obj,event)
+
         # draw as long as left mouse button pressed down 
-        #self.slice_view.interactor_style.AddObserver("MouseMoveEvent", self.draw)
         self.slice_view.interactor_style.AddObserver("MouseMoveEvent", self.draw)  
         self.slice_view.interactor_style.AddObserver("LeftButtonReleaseEvent", self.end_draw)
     
-    """def draw(self, object, event):
-        x = vtk.vtkMath.Round(self.imgPos[0])
-        y = vtk.vtkMath.Round(self.imgPos[1])
-        s = self.brush_size
-        self.canvas.DrawCircle(x, y, s)  # for bigger circles not everything filled out
-        self.slice_view.GetRenderWindow().Render()"""
 
-    def draw(self, object, event):
-        ##################################### slicer maybe outside?, more things outside?
-        #self.filter = self.maskFilter()
-        extent = self.image.GetExtent()  
-        x = vtk.vtkMath.Round(self.imgPos[0])
-        y = vtk.vtkMath.Round(self.imgPos[1])
+    def draw(self, obj, event):
+        x = int(round(self.imgPos[0]))
+        y = int(round(self.imgPos[1]))
+        z = int(self.slice_view.slice)
+
+        if x < 0 or y < 0 or z < 0:
+            return
+
+        # draw circle
         s = self.brush_size
-        self.filter.SetDrawColor(0, 0, 0)
-        self.filter.FillBox(extent[0],extent[1],extent[2],extent[3])
-        self.filter.SetDrawColor(255,255,255)
-        self.filter.DrawCircle(x,y,s)
-        self.filter.FillPixel(x,y)
-        self.filter.Update()
+        self.segmentation[x-s:x+s+1,y-s:y+s+1,z][self.circle_mask] = self.draw_value
         
-        ## to-do: instead of replacing whole slice only extract part around circle and put this into canvas 
-        slicer = vtk.vtkImageReslice()
-        slicer.SetInputConnection(self.canvas.GetOutputPort())
-        slicer.SetOutputDimensionality(2)
-        slicer.SetResliceAxesOrigin(x,y, self.canvas.GetDefaultZ())  
-        self.inverseMaskFilter.SetInputConnection(0, slicer.GetOutputPort())
-        self.inverseMaskFilter.SetInputConnection(1,self.filter.GetOutputPort())
-        self.inverseMaskFilter.NotMaskOn()
-        self.inverseMaskFilter.Update()  
-        self.canvas.DrawImage(0,0, self.inverseMaskFilter.GetOutput(0))  # not working with origin --> WHY? (origin != 0,0 ??)
+        # update the label map (shallow copies make this efficient)
+        vtk_data_array = numpy_to_vtk(self.segmentation.ravel(order='F'))
+        self.model_view.label_map.GetPointData().SetScalars(vtk_data_array)
         self.slice_view.GetRenderWindow().Render()
-        
-        # reset filter 
-        self.filter.SetDrawColor(0, 0, 0)
-        self.filter.FillBox(extent[0],extent[1],extent[2],extent[3])
-    
+
+
     def end_draw(self, obj, event):
         id = vtk.vtkCommand.MouseMoveEvent
         self.slice_view.interactor_style.RemoveObservers(id)  
         self.slice_view.interactor_style.AddObserver("MouseMoveEvent", self.pickPosition)
+
+        # update 3D display
+        self.model_view.padding.SetInputData(self.model_view.label_map)
+        self.model_view.GetRenderWindow().Render()
+
 
     def saveChanges(self, path_seg, path_lumen, path_plaque):
         # catch if one side has something to save, other side not
@@ -467,6 +459,7 @@ class SegmentationModuleTab(QWidget):
             writer.SetFileName(path_plaque)
             writer.SetInputData(plaque)
             writer.Write()
+
 
     def close(self):
         self.slice_view.Finalize()
