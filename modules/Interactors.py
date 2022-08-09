@@ -1,3 +1,5 @@
+import os
+
 import numpy as np
 import vtk
 from PyQt5.QtCore import pyqtSignal
@@ -30,8 +32,14 @@ class ImageSliceInteractor(QVTKRenderWindowInteractor):
         self.image_actor = vtk.vtkImageActor()
         self.image_actor.SetMapper(self.image_mapper)
 
+        self.text_patient = vtk.vtkTextActor()
+        self.text_patient.SetInput("No file found.")
+        self.text_patient.SetDisplayPosition(10, 10)
+        self.text_patient.GetTextProperty().SetFontSize(20)
+
         self.renderer = vtk.vtkRenderer()
         self.renderer.SetBackground(0,0,0)
+        self.renderer.AddActor(self.text_patient)
         cam = self.renderer.GetActiveCamera()
         cam.ParallelProjectionOn()
         cam.SetPosition(0, 0, -100)
@@ -76,7 +84,10 @@ class ImageSliceInteractor(QVTKRenderWindowInteractor):
         self.image_mapper.SetInputData(image)
         self.min_slice = self.image_mapper.GetSliceNumberMinValue()
         self.max_slice = self.image_mapper.GetSliceNumberMaxValue()
-        self.slice = self.min_slice
+        self.setSlice(self.min_slice)
+
+        # set file text
+        self.text_patient.SetInput(os.path.basename(path)[:-5])
 
         # re-focus the camera
         self.renderer.AddActor(self.image_actor)
@@ -92,7 +103,7 @@ class ImageSliceInteractor(QVTKRenderWindowInteractor):
         self.image_mapper.SetInputData(image)
         self.min_slice = self.image_mapper.GetSliceNumberMinValue()
         self.max_slice = self.image_mapper.GetSliceNumberMaxValue()
-        self.slice = self.min_slice
+        self.setSlice(self.min_slice)
 
         # re-focus the camera
         self.renderer.AddActor(self.image_actor)
@@ -103,6 +114,7 @@ class ImageSliceInteractor(QVTKRenderWindowInteractor):
     
     def reset(self):
         self.renderer.RemoveActor(self.image_actor)
+        self.text_patient.SetInput("No file found.")
         self.min_slice = 0
         self.max_slice = 0
         self.slice = 0
@@ -128,8 +140,10 @@ class IsosurfaceInteractor(QVTKRenderWindowInteractor):
         self.marching_lumen = vtk.vtkDiscreteMarchingCubes()
         self.marching_lumen.SetInputConnection(self.padding.GetOutputPort())
         self.marching_lumen.GenerateValues(1, 2, 2)
+        self.clean_lumen = vtk.vtkCleanPolyData()
+        self.clean_lumen.SetInputConnection(self.marching_lumen.GetOutputPort())
         self.smoother_lumen = vtk.vtkWindowedSincPolyDataFilter()
-        self.smoother_lumen.SetInputConnection(self.marching_lumen.GetOutputPort())
+        self.smoother_lumen.SetInputConnection(self.clean_lumen.GetOutputPort())
         self.smoother_lumen.SetNumberOfIterations(20)
         self.smoother_lumen.SetPassBand(0.005)
         self.mapper_lumen = vtk.vtkPolyDataMapper()
@@ -142,8 +156,10 @@ class IsosurfaceInteractor(QVTKRenderWindowInteractor):
         self.marching_plaque = vtk.vtkDiscreteMarchingCubes()
         self.marching_plaque.SetInputConnection(self.padding.GetOutputPort())
         self.marching_plaque.GenerateValues(1, 1, 1)
+        self.clean_plaque = vtk.vtkCleanPolyData()
+        self.clean_plaque.SetInputConnection(self.marching_plaque.GetOutputPort())
         self.smoother_plaque = vtk.vtkWindowedSincPolyDataFilter()
-        self.smoother_plaque.SetInputConnection(self.marching_plaque.GetOutputPort())
+        self.smoother_plaque.SetInputConnection(self.clean_plaque.GetOutputPort())
         self.smoother_plaque.SetNumberOfIterations(20)
         self.smoother_plaque.SetPassBand(0.005)
         self.mapper_plaque = vtk.vtkPolyDataMapper()
@@ -165,12 +181,34 @@ class IsosurfaceInteractor(QVTKRenderWindowInteractor):
         cam.SetViewUp(0, -1, 0)
 
 
-    def loadNrrd(self, path):
+    def loadNrrd(self, path, src_image=None):
         # read the file
         reader = vmtkscripts.vmtkImageReader()
         reader.InputFileName = path
         reader.Execute()
-        self.label_map = reader.Image
+
+        # Set the extent of the labelmap to the fixed model size (120, 144, 248).
+        # Uses the source image (CTA volume) to position the labelmap.
+        # Assumes the labelmap extent and origin to be within the source image.
+        if src_image is not None:
+            label_origin = reader.Image.GetOrigin()
+            src_origin = src_image.GetOrigin()
+            src_spacing = src_image.GetSpacing()
+            x_offset = int(abs(round((src_origin[0] - label_origin[0]) / src_spacing[0])))
+            y_offset = int(abs(round((src_origin[1] - label_origin[1]) / src_spacing[1])))
+            z_offset = int(abs(round((src_origin[2] - label_origin[2]) / src_spacing[2])))
+            extent = np.array([-x_offset, 119-x_offset, -y_offset, 143-y_offset, -z_offset, 247-z_offset])
+            pad = vtk.vtkImageConstantPad()
+            pad.SetConstant(0)
+            pad.SetInputData(reader.Image)
+            pad.SetOutputWholeExtent(extent)
+            pad.Update()
+            self.label_map = pad.GetOutput()
+            self.label_map.SetOrigin(src_origin)
+            self.label_map.SetExtent(0, 119, 0, 143, 0, 247)
+        else:
+            self.label_map = reader.Image
+        
         
         # convert to check if plaque actor is necessary
         img_to_numpy = vmtkscripts.vmtkImageToNumpy()

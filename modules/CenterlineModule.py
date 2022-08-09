@@ -53,6 +53,14 @@ class CenterlineModuleTab(QWidget):
         self.actor_centerline.GetProperty().SetLineWidth(3)
         self.actor_centerline.GetProperty().RenderLinesAsTubesOn()
 
+        # other vtk props
+        self.text_patient = vtk.vtkTextActor()
+        self.text_patient.SetInput("No segmentation file found for this side.")
+        self.text_patient.SetDisplayPosition(10, 10)
+        self.text_patient.GetTextProperty().SetColor(0, 0, 0)
+        self.text_patient.GetTextProperty().SetFontSize(20)
+        self.renderer.AddActor(self.text_patient)
+
         self.centerline_view.Initialize()
         self.centerline_view.Start()
 
@@ -86,9 +94,12 @@ class CenterlineModuleTab(QWidget):
 
     def loadModels(self, lumen_file, centerline_file):
         if lumen_file:
+            self.reader_lumen.SetFileName("") # forces a reload
             self.reader_lumen.SetFileName(lumen_file)
+            self.reader_lumen.Update()
             self.renderer.AddActor(self.actor_lumen)
             self.lumen_active = True
+            self.text_patient.SetInput(os.path.basename(lumen_file)[:-4])
             if centerline_file:
                 self.reader_centerline.SetFileName(centerline_file)
                 self.mapper_centerline.SetInputConnection(self.reader_centerline.GetOutputPort())
@@ -103,6 +114,7 @@ class CenterlineModuleTab(QWidget):
             self.centerlines = None
             self.renderer.RemoveActor(self.actor_lumen)
             self.renderer.RemoveActor(self.actor_centerline)
+            self.text_patient.SetInput("No segmentation file found for this side.")
         self.centerline_view.GetRenderWindow().Render()
 
 
@@ -134,6 +146,9 @@ class CenterlineModule(QTabWidget):
         self.centerline_module_left = CenterlineModuleTab()
         self.centerline_module_right = CenterlineModuleTab()
 
+        self.centerline_module_left.data_modified.connect(self.dataModifiedLeft)
+        self.centerline_module_right.data_modified.connect(self.dataModifiedRight)
+
         self.addTab(self.centerline_module_right, "Right")
         self.addTab(self.centerline_module_left, "Left")
 
@@ -153,11 +168,20 @@ class CenterlineModule(QTabWidget):
         path_left  = os.path.join(base_path, "models", patient_ID + "_left_lumen_centerlines.vtp")
         self.centerline_module_right.saveChanges(path_right)
         self.centerline_module_left.saveChanges(path_left)
+        self.setTabText(0, "Right")
+        self.setTabText(1, "Left")
         self.new_centerlines.emit()
 
+    def dataModifiedRight(self):
+        self.setTabText(0, "Right " + SYM_UNSAVED_CHANGES)
+
+    def dataModifiedLeft(self):
+        self.setTabText(1, "Left " + SYM_UNSAVED_CHANGES)
     
     def discard(self):
         self.loadPatient(self.patient_dict)
+        self.setTabText(0, "Right")
+        self.setTabText(1, "Left")
 
 
     def close(self):

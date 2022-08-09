@@ -8,7 +8,7 @@ from vtk.util.numpy_support import vtk_to_numpy, numpy_to_vtk
 from PyQt5.QtCore import Qt, pyqtSignal
 from PyQt5.QtWidgets import  (
     QWidget, QVBoxLayout, QHBoxLayout, QSlider, QTabWidget,
-    QPushButton, QMessageBox, QGridLayout, QLabel, QGroupBox
+    QPushButton, QMessageBox, QGridLayout, QLabel
 )
 
 from modules.Interactors import ImageSliceInteractor, IsosurfaceInteractor
@@ -181,17 +181,17 @@ class SegmentationModuleTab(QWidget):
             self.image = None
         
         if seg_file:
-            self.model_view.loadNrrd(seg_file)
+            self.model_view.loadNrrd(seg_file, self.image)
             self.model_view.renderer.AddActor(self.lumen_outline_actor3D)
             self.slice_view.renderer.AddActor(self.lumen_outline_actor2D)
             self.model_view.renderer.AddActor(self.plaque_outline_actor3D)
             self.slice_view.renderer.AddActor(self.plaque_outline_actor2D)
         else:
-            self.model_view.reset()
             self.model_view.renderer.RemoveActor(self.lumen_outline_actor3D)
             self.slice_view.renderer.RemoveActor(self.lumen_outline_actor2D)
             self.model_view.renderer.RemoveActor(self.plaque_outline_actor3D)
             self.slice_view.renderer.RemoveActor(self.plaque_outline_actor2D)
+            self.model_view.reset()
 
 
     def generateCNNSeg(self):
@@ -227,6 +227,7 @@ class SegmentationModuleTab(QWidget):
             self.segmentation = self.segmentation.reshape(shape, order='F')
             self.draw_value = 0
 
+            # map 2D display through colormap
             self.masks_color_mapped = vtk.vtkImageMapToColors() 
             self.masks_color_mapped.SetLookupTable(self.lookuptable) 
             self.masks_color_mapped.PassAlphaToOutputOn()
@@ -417,7 +418,7 @@ class SegmentationModuleTab(QWidget):
         if x_dim == 0 or y_dim == 0 or z_dim == 0:
             return
 
-        # save segmentation nrrd
+        # save segmentation nrrd (geometry based on image volume)
         header_img = nrrd.read_header(self.volume_file)
         header = OrderedDict()
         header['type'] = 'unsigned char'
@@ -442,8 +443,6 @@ class SegmentationModuleTab(QWidget):
         header['Segment1_Layer'] = 0
         header['Segment1_Extent'] = '0 119 0 143 0 247'
         segmentation = vtk_to_numpy(self.model_view.label_map.GetPointData().GetScalars())
-        #canvas_img = self.canvas.GetOutputDataObject(0)  # error:'SegmentationModuleTab' object has no attribute 'canvas' -> canvas implemented in line 236, why is it not possible to use?
-        #canvas_array = vtk_to_numpy(canvas_img.GetPointData().GetScalars())  #-> vtkarray needed to convert to numpy array 
         segmentation = segmentation.reshape(x_dim, y_dim, z_dim, order='F')
         nrrd.write(path_seg, segmentation, header)
 
@@ -480,6 +479,9 @@ class SegmentationModule(QTabWidget):
         self.segmentation_module_left = SegmentationModuleTab()
         self.segmentation_module_right = SegmentationModuleTab()
 
+        self.segmentation_module_left.data_modified.connect(self.dataModifiedLeft)
+        self.segmentation_module_right.data_modified.connect(self.dataModifiedRight)
+
         self.addTab(self.segmentation_module_right, "Right")
         self.addTab(self.segmentation_module_left, "Left")
 
@@ -492,8 +494,18 @@ class SegmentationModule(QTabWidget):
             patient_dict['volume_left'], patient_dict['seg_left'], patient_dict['seg_left_pred'])
 
 
+    def dataModifiedRight(self):
+        self.setTabText(0, "Right " + SYM_UNSAVED_CHANGES)
+
+
+    def dataModifiedLeft(self):
+        self.setTabText(1, "Left " + SYM_UNSAVED_CHANGES)
+
+
     def discard(self):
         self.loadPatient(self.patient_dict)
+        self.setTabText(0, "Right")
+        self.setTabText(1, "Left")
 
 
     def save(self):
@@ -509,6 +521,9 @@ class SegmentationModule(QTabWidget):
         path_lumen = os.path.join(base_path, "models", patient_ID + "_left_lumen.stl")
         path_plaque = os.path.join(base_path, "models", patient_ID + "_left_plaque.stl")
         self.segmentation_module_left.saveChanges(path_seg, path_lumen, path_plaque)
+
+        self.setTabText(0, "Right")
+        self.setTabText(1, "Left")
 
         self.new_segmentation.emit()
         self.new_models.emit()
