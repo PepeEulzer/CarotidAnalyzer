@@ -51,8 +51,8 @@ class ImageSliceInteractor(QVTKRenderWindowInteractor):
     def setSlice(self, slice_nr):
         self.slice = slice_nr
         self.image_mapper.SetSliceNumber(slice_nr)
-        self.GetRenderWindow().Render()
         self.slice_changed.emit(self.slice)
+        self.GetRenderWindow().Render()
 
 
     def mouseWheelForward(self, obj, event):
@@ -130,12 +130,11 @@ class IsosurfaceInteractor(QVTKRenderWindowInteractor):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.SetInteractorStyle(vtk.vtkInteractorStyleTrackballCamera())
-        self.label_map = vtk.vtkImageData()
+        # self.label_map = vtk.vtkImageData()
 
         # build isosurface, mapper, actor pipeline
         self.padding = vtk.vtkImageConstantPad()
         self.padding.SetConstant(0)
-        self.padding.SetInputData(self.label_map)
 
         self.marching_lumen = vtk.vtkDiscreteMarchingCubes()
         self.marching_lumen.SetInputConnection(self.padding.GetOutputPort())
@@ -203,22 +202,22 @@ class IsosurfaceInteractor(QVTKRenderWindowInteractor):
             pad.SetInputData(reader.Image)
             pad.SetOutputWholeExtent(extent)
             pad.Update()
-            self.label_map = pad.GetOutput()
-            self.label_map.SetOrigin(src_origin)
-            self.label_map.SetExtent(0, 119, 0, 143, 0, 247)
+            label_map = pad.GetOutput()
+            label_map.SetOrigin(src_origin)
+            label_map.SetExtent(0, 119, 0, 143, 0, 247)
         else:
-            self.label_map = reader.Image
+            label_map = reader.Image
         
         
         # convert to check if plaque actor is necessary
         img_to_numpy = vmtkscripts.vmtkImageToNumpy()
-        img_to_numpy.Image = self.label_map
+        img_to_numpy.Image = label_map
         img_to_numpy.Execute()
         
         # add padding
-        extent = np.array(self.label_map.GetExtent())
+        extent = np.array(label_map.GetExtent())
         extent += np.array([-1, 1, -1, 1, -1, 1])
-        self.padding.SetInputData(self.label_map)
+        self.padding.SetInputData(label_map)
         self.padding.SetOutputWholeExtent(extent)
         
         # update the scene (pipeline triggers automatically)
@@ -230,9 +229,12 @@ class IsosurfaceInteractor(QVTKRenderWindowInteractor):
         self.renderer.ResetCamera()
         self.GetRenderWindow().Render()
 
+        # return pointer if needed
+        return label_map
+
 
     def reset(self):
-        self.label_map = vtk.vtkImageData()
+        # self.label_map = vtk.vtkImageData()
         self.renderer.RemoveActor(self.actor_lumen)
         self.renderer.RemoveActor(self.actor_plaque)
         self.GetRenderWindow().Render()
