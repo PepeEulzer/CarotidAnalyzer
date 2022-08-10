@@ -208,16 +208,22 @@ class SegmentationModuleTab(QWidget):
         
         if seg_file:
             self.label_map = self.model_view.loadNrrd(seg_file, self.image)
+            self.__loadLabelMapData()
             self.model_view.renderer.AddActor(self.lumen_outline_actor3D)
-            self.slice_view.renderer.AddActor(self.lumen_outline_actor2D)
             self.model_view.renderer.AddActor(self.plaque_outline_actor3D)
-            self.slice_view.renderer.AddActor(self.plaque_outline_actor2D)
+            if not self.editing_active:
+                self.slice_view.renderer.AddActor(self.lumen_outline_actor2D)
+                self.slice_view.renderer.AddActor(self.plaque_outline_actor2D)
+            self.slice_view.GetRenderWindow().Render()
+            self.model_view.GetRenderWindow().Render()
         else:
             self.label_map = None
             self.model_view.renderer.RemoveActor(self.lumen_outline_actor3D)
             self.slice_view.renderer.RemoveActor(self.lumen_outline_actor2D)
             self.model_view.renderer.RemoveActor(self.plaque_outline_actor3D)
             self.slice_view.renderer.RemoveActor(self.plaque_outline_actor2D)
+            self.slice_view.GetRenderWindow().Render()
+            self.model_view.GetRenderWindow().Render()
             self.model_view.reset()
 
 
@@ -234,11 +240,22 @@ class SegmentationModuleTab(QWidget):
             button = dlg.exec()
             if button == QMessageBox.Ok:
                 self.model_view.loadNrrd(self.pred_file)
+                self.__loadLabelMapData()
                 self.model_view.renderer.AddActor(self.lumen_outline_actor3D)
-                self.slice_view.renderer.AddActor(self.lumen_outline_actor2D)
                 self.model_view.renderer.AddActor(self.plaque_outline_actor3D)
-                self.slice_view.renderer.AddActor(self.plaque_outline_actor2D)
+                if not self.editing_active:
+                    self.slice_view.renderer.AddActor(self.lumen_outline_actor2D)
+                    self.slice_view.renderer.AddActor(self.plaque_outline_actor2D)
+                self.slice_view.GetRenderWindow().Render()
+                self.model_view.GetRenderWindow().Render()
                 self.data_modified.emit()
+
+    
+    def __loadLabelMapData(self):
+        shape = self.label_map.GetDimensions()
+        self.label_map_data = vtk_to_numpy(self.label_map.GetPointData().GetScalars())
+        self.label_map_data = self.label_map_data.reshape(shape, order='F')
+        self.masks_color_mapped.SetInputData(self.label_map)
 
 
     def activateEditing(self):
@@ -250,17 +267,11 @@ class SegmentationModuleTab(QWidget):
         self.brushSizeChanged(15)
         self.setColorErase()
 
-        # extract data array and enable VTK pixel display pipeline
-        shape = self.label_map.GetDimensions()
-        self.label_map_data = vtk_to_numpy(self.label_map.GetPointData().GetScalars())
-        self.label_map_data = self.label_map_data.reshape(shape, order='F')
-        self.masks_color_mapped.SetInputData(self.label_map)
-
+        # change scene
         self.slice_view.renderer.RemoveActor(self.lumen_outline_actor2D)
         self.slice_view.renderer.RemoveActor(self.plaque_outline_actor2D)
         self.slice_view.renderer.AddActor(self.mask_slice_actor)
         self.slice_view.GetRenderWindow().Render()
-        self.data_modified.emit()
       
         
     def deactivateEditing(self):
@@ -361,6 +372,7 @@ class SegmentationModuleTab(QWidget):
     def start_draw(self, obj, event):
         # draw first point at position clicked on 
         self.draw(obj,event)
+        self.data_modified.emit()
 
         # draw as long as left mouse button pressed down 
         self.slice_view.interactor_style.AddObserver("MouseMoveEvent", self.draw)  
