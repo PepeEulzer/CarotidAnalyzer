@@ -14,6 +14,7 @@ from mainwindow_ui import Ui_MainWindow
 from modules.CropModule import CropModule
 from modules.CenterlineModule import CenterlineModule
 from modules.SegmentationModule import SegmentationModule
+from modules.StenosisClassifier import StenosisClassifier
 
 class CarotidAnalyzer(QMainWindow, Ui_MainWindow):
     def __init__(self, parent=None):
@@ -33,9 +34,11 @@ class CarotidAnalyzer(QMainWindow, Ui_MainWindow):
         self.crop_module = CropModule(self)
         self.segmentation_module = SegmentationModule(self)
         self.centerline_module = CenterlineModule(self)
+        self.stenosis_classifier = StenosisClassifier(self)
         self.module_stack.addWidget(self.crop_module)
         self.module_stack.addWidget(self.segmentation_module)
         self.module_stack.addWidget(self.centerline_module)
+        self.module_stack.addWidget(self.stenosis_classifier)
 
         # only one module can be active
         self.processing_modules = [
@@ -170,6 +173,7 @@ class CarotidAnalyzer(QMainWindow, Ui_MainWindow):
         if len(dir) > 0:
             self.setWorkingDir(dir)
 
+
     def setPatientTreeItemColor(self, item, color):
         if item is None:
             return
@@ -179,6 +183,7 @@ class CarotidAnalyzer(QMainWindow, Ui_MainWindow):
         for i in range(item.childCount()):
             for j in range(3):
                 item.child(i).setBackground(j, c)
+
 
     def loadSelectedPatient(self):
         # get top parent item
@@ -200,6 +205,7 @@ class CarotidAnalyzer(QMainWindow, Ui_MainWindow):
                 self.crop_module.loadPatient(patient)
                 self.segmentation_module.loadPatient(patient)
                 self.centerline_module.loadPatient(patient)
+                self.stenosis_classifier.loadPatient(patient)
                 self.__checkSegMatchesModels()
                 break
 
@@ -277,6 +283,7 @@ class CarotidAnalyzer(QMainWindow, Ui_MainWindow):
     def viewStenosisClassifier(self, on:bool):
         if on:
             self.uncheckInactiveModules(self.action_stenosis_classifier)
+            self.module_stack.setCurrentWidget(self.stenosis_classifier)
         else:
             self.module_stack.setCurrentWidget(self.empty_module)
 
@@ -351,6 +358,7 @@ class CarotidAnalyzer(QMainWindow, Ui_MainWindow):
 
         # propagate
         self.centerline_module.loadPatient(self.active_patient_dict)
+        self.stenosis_classifier.loadPatient(self.active_patient_dict)
 
     
     def newCenterlines(self):
@@ -365,6 +373,9 @@ class CarotidAnalyzer(QMainWindow, Ui_MainWindow):
         if os.path.exists(path_right):
             self.active_patient_dict['centerlines_right'] = path_right
             centerlines_item.setText(2, SYM_YES)
+
+        # propagate
+        self.stenosis_classifier.loadPatient(self.active_patient_dict)
 
 
     def okToClose(self):

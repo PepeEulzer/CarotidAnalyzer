@@ -3,7 +3,7 @@ import os
 import vtk
 from vmtk import vmtkscripts
 from vtk.qt.QVTKRenderWindowInteractor import QVTKRenderWindowInteractor
-from PyQt5.QtCore import QObject, QThread, pyqtSignal
+from PyQt5.QtCore import pyqtSignal
 from PyQt5.QtWidgets import QWidget, QVBoxLayout, QTabWidget, QPushButton
 
 from defaults import *
