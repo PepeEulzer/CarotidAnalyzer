@@ -30,12 +30,15 @@ class SegmentationModuleTab(QWidget):
         self.pred_file = False      # path to CNN segmentation prediction file
         self.editing_active = False # whether label map editing is active
         self.brush_size = 0         # size of brush on label map
+        self.draw3D = False         # set dimension of brush  # ?: default=0 to force user to select dimension; work with true/false? (2 variables or 1 variable w/ true:=2d, false:=3D)
         
         # on-screen objects
         self.CNN_button = QPushButton("New Segmentation: Initialize with CNN")
         self.edit_button = QPushButton("Edit Segmentation")  
         self.edit_button.setEnabled(False)
         self.brush_button = QPushButton("Brush") 
+        self.brush_2D = QPushButton("2D")  # show which mode selected 
+        self.brush_3D = QPushButton("3D")
         self.stop_editing_button = QPushButton("Stop Editing")
         self.lumen_button = QPushButton("Lumen")
         self.plaque_button = QPushButton("Plaque")
@@ -49,6 +52,8 @@ class SegmentationModuleTab(QWidget):
         self.brush_slider_label = QLabel()
         self.brush_slider_label.setText("Brush/Eraser Size") 
         self.brush_button.setVisible(False)
+        self.brush_2D.setVisible(False) 
+        self.brush_3D.setVisible(False)
         self.eraser_button.setVisible(False)
         self.stop_editing_button.setVisible(False)
         self.lumen_button.setVisible(False)
@@ -71,6 +76,8 @@ class SegmentationModuleTab(QWidget):
         self.edit_buttons_layout = QGridLayout()
         self.edit_buttons_layout.setVerticalSpacing(30)  
         self.edit_buttons_layout.addWidget(self.brush_button, 0,0,1,2) 
+        self.edit_buttons_layout.addWidget(self.brush_2D, 0,0)
+        self.edit_buttons_layout.addWidget(self.brush_3D, 0,1)
         self.edit_buttons_layout.addWidget(self.lumen_button, 1,0)
         self.edit_buttons_layout.addWidget(self.plaque_button, 1,1)
         self.edit_buttons_layout.addWidget(self.eraser_button, 2,0,1,2)
@@ -99,7 +106,9 @@ class SegmentationModuleTab(QWidget):
         self.slice_view.slice_changed[int].connect(self.sliceChanged)
         self.slice_view_slider.valueChanged[int].connect(self.slice_view.setSlice)
         self.edit_button.pressed.connect(self.activateEditing)
-        self.brush_button.pressed.connect(self.drawMode)  # put elsewhere? 
+        self.brush_button.pressed.connect(self.drawMode)  
+        self.brush_2D.pressed.connect(self.set2DBrush)
+        self.brush_3D.pressed.connect(self.set3DBrush)
         self.brush_size_slider.valueChanged[int].connect(self.brushSizeChanged)
         self.stop_editing_button.pressed.connect(self.deactivateEditing)
         self.eraser_button.pressed.connect(self.setColorErase)
@@ -159,7 +168,7 @@ class SegmentationModuleTab(QWidget):
         self.mask_slice_actor.SetMapper(self.mask_slice_mapper)
         self.mask_slice_actor.InterpolateOff()
     
-        # circle around mouse when drawing 
+        # circle/sphere around mouse when drawing 
         self.circle = self.setUpCircle()
         circle_mapper = vtk.vtkPolyDataMapper()
         circle_mapper.SetInputConnection(self.circle.GetOutputPort())
@@ -258,14 +267,15 @@ class SegmentationModuleTab(QWidget):
         self.masks_color_mapped.SetInputData(self.label_map)
 
 
-    def activateEditing(self):
+    def activateEditing(self): 
         # show all buttons that are needed for editing
         self.editing_active = True 
         self.brush_button.setVisible(True)
         self.stop_editing_button.setVisible(True)
         self.edit_button.setEnabled(False)
         self.brushSizeChanged(15)
-        self.setColorErase()
+        self.setColorErase()  # or set default once at beginning, then stick with what user selected last 
+        self.set2DBrush()
 
         # change scene
         self.slice_view.renderer.RemoveActor(self.lumen_outline_actor2D)
@@ -278,13 +288,15 @@ class SegmentationModuleTab(QWidget):
         # hide all buttons and remove all actors for editing, enable editing again
         self.editing_active = False
         self.brush_button.setVisible(False)
+        self.brush_2D.setVisible(False)
+        self.brush_3D.setVisible(False)
         self.stop_editing_button.setVisible(False)
         self.lumen_button.setVisible(False)
-        self.lumen_button.setStyleSheet("background-color: light gray")
+        #self.lumen_button.setStyleSheet("background-color: light gray")
         self.plaque_button.setVisible(False)
-        self.plaque_button.setStyleSheet("background-color: light gray")
+        #self.plaque_button.setStyleSheet("background-color: light gray")
         self.eraser_button.setVisible(False)
-        self.eraser_button.setStyleSheet("background-color: light gray")
+        #self.eraser_button.setStyleSheet("background-color: light gray")
         self.brush_size_slider.setVisible(False)
         self.brush_slider_label.setVisible(False)
         self.edit_button.setEnabled(True)
@@ -303,20 +315,44 @@ class SegmentationModuleTab(QWidget):
         return circle
 
 
-    def brushSizeChanged(self, brush_size):
+    def brushSizeChanged(self, brush_size): 
         # change size of drawing on label map
         self.brush_size = int(round(brush_size*self.image.GetSpacing()[0]))
-        self.circle.SetRadius(self.brush_size*self.image.GetSpacing()[0])
-
-        # create circle mask
+        self.circle.SetRadius(self.brush_size*self.image.GetSpacing()[0])  
+        
         axis = np.arange(-self.brush_size, self.brush_size+1, 1)
-        X, Y = np.meshgrid(axis, axis)
-        R = X**2 + Y**2
-        R[R < self.brush_size**2] = 1
-        R[R > 1] = 0
-        self.circle_mask = R.astype(np.bool_)
-        self.slice_view.GetRenderWindow().Render()
+        if self.draw3D == False:  
+            # create circle mask
+            X, Y = np.meshgrid(axis, axis)  
+            R = X**2 + Y**2
+            R[R < self.brush_size**2] = 1
+            R[R > 1] = 0
+            
+        elif self.draw3D == True:  
+            size_z = int(vtk.vtkMath.Ceil(brush_size*self.image.GetSpacing()[2]))  
+            axis_z = np.arange(-size_z, size_z+1, 1)
+            X, Y, Z = np.meshgrid(axis, axis,axis_z)  
+            R = X**2 + Y**2 + Z**2
+            print(R)
+            R[R < self.brush_size**2]  = 1  # with this every value in mask less than threshold 
+            # self.brush_size**2] = 1  # with this ellipsoid (circular when looking along z axis)
+            R[R > 1] = 0 
+            print(R)
 
+        self.circle_mask = R.astype(np.bool_) 
+        self.slice_view.GetRenderWindow().Render()    
+
+    def set2DBrush(self):
+        self.draw3D = False
+        self.brushSizeChanged(round(self.brush_size/self.image.GetSpacing()[0]))
+        self.brush_2D.setStyleSheet("background-color: rgb(175,175,175)")
+        self.brush_3D.setStyleSheet("background-color: light gray")
+        
+    def set3DBrush(self):
+        self.draw3D = True
+        self.brushSizeChanged(round(self.brush_size/self.image.GetSpacing()[0]))  # or additional method?
+        self.brush_3D.setStyleSheet("background-color: rgb(175,175,175)")
+        self.brush_2D.setStyleSheet("background-color: light gray")
 
     def setColorLumen(self):
         self.draw_value = 2
@@ -338,14 +374,16 @@ class SegmentationModuleTab(QWidget):
         self.draw_value = 0
         self.lumen_button.setStyleSheet("background-color: light gray")
         self.plaque_button.setStyleSheet("background-color: light gray")
-        self.eraser_button.setStyleSheet("background-color: rgb(50,50,50)")
-        self.circle_actor.GetProperty().SetColor(1,1,1)   # show circle in white (is like this in the moment)
-
+        self.eraser_button.setStyleSheet("background-color: rgb(175,175,175)")
+        self.circle_actor.GetProperty().SetColor(1,1,1)   # show circle in white 
     
     def drawMode(self):  
         self.slice_view.interactor_style.AddObserver("MouseMoveEvent", self.pickPosition)
         self.slice_view.interactor_style.AddObserver("LeftButtonPressEvent", self.start_draw)  # remove at some point?
-        self.lumen_button.setVisible(True)  # set false if exiting drawing/enable only if "draw" clicked 
+        self.brush_button.setVisible(False)
+        self.brush_2D.setVisible(True)
+        self.brush_3D.setVisible(True)
+        self.lumen_button.setVisible(True) 
         self.plaque_button.setVisible(True)
         self.eraser_button.setVisible(True)
         self.brush_size_slider.setVisible(True)
@@ -379,7 +417,7 @@ class SegmentationModuleTab(QWidget):
         self.slice_view.interactor_style.AddObserver("LeftButtonReleaseEvent", self.end_draw)
     
 
-    def draw(self, obj, event):
+    def draw(self, obj, event):  
         # get discrete click position on label map
         x = int(round(self.imgPos[0]))
         y = int(round(self.imgPos[1]))
@@ -389,19 +427,29 @@ class SegmentationModuleTab(QWidget):
         if x < 0 or y < 0 or z < 0:
             return
 
-        # draw circle
         s = self.brush_size
         x0 = max(x-s, 0)
         x1 = min(x+s+1, self.label_map_data.shape[0])
         y0 = max(y-s, 0)
         y1 = min(y+s+1, self.label_map_data.shape[1])
-        mask = self.circle_mask[x0-x+s:x1-x+s, y0-y+s:y1-y+s] # crop circle mask at borders
-        self.label_map_data[x0:x1,y0:y1,z][mask] = self.draw_value
-        
-        # update the label map (shallow copies make this efficient)
+        if self.draw3D == False:
+            # draw circle  
+            mask = self.circle_mask[x0-x+s:x1-x+s, y0-y+s:y1-y+s] # crop circle mask at borders
+            self.label_map_data[x0:x1,y0:y1,z][mask] = self.draw_value
+            
+        else: 
+            # draw sphere
+            z0 = max(z-s, 0)
+            z1 = min(z+s+1, self.label_map_data.shape[2])
+            mask = self.circle_mask[x0-x+s:x1-x+s, y0-y+s:y1-y+s, z0-z+s:z1-z+s] # crop sphere mask at borders
+            self.label_map_data[x0:x1,y0:y1,z0:z1][mask] = self.draw_value
+            
+        # update the label map (shallow copies make this efficient)   
         vtk_data_array = numpy_to_vtk(self.label_map_data.ravel(order='F'))
         self.label_map.GetPointData().SetScalars(vtk_data_array)
         self.slice_view.GetRenderWindow().Render()
+        
+        
 
 
     def end_draw(self, obj, event):
