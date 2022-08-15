@@ -4,6 +4,7 @@ import numpy as np
 import vtk
 from vtk.util.numpy_support import vtk_to_numpy
 from vtk.qt.QVTKRenderWindowInteractor import QVTKRenderWindowInteractor
+from vmtk import vmtkscripts
 from PyQt5.QtWidgets import QWidget, QHBoxLayout, QTabWidget
 from PyQt5.QtGui import QColor
 import pyqtgraph as pg
@@ -21,7 +22,10 @@ class StenosisClassifierTab(QWidget):
     """
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.centerlines = None
+        self.centerlines = None # raw centerlines (vtkPolyData)
+        self.c_radii_lists = [] # processed centerline radii
+        self.c_pos_lists = []   # processed centerline positions
+        self.c_arc_lists = []   # processed centerline arc length (cumulated)
 
         # model view
         self.model_view = QVTKRenderWindowInteractor(self)
@@ -36,6 +40,7 @@ class StenosisClassifierTab(QWidget):
 
         # graph view
         self.widget_lineplots = pg.GraphicsLayoutWidget()
+        self.lineplots = []
 
         # combine all in a layout
         self.top_layout = QHBoxLayout(self)
@@ -102,7 +107,7 @@ class StenosisClassifierTab(QWidget):
             self.mapper_centerline.SetInputConnection(self.reader_centerline.GetOutputPort())
             self.renderer.AddActor(self.actor_centerline)
             self.centerlines = self.reader_centerline.GetOutput()
-            self.radii_split = self.__preprocessCenterlines(self.centerlines)
+            self.__preprocessCenterlines(self.centerlines)
             self.plot_radii()
 
         else:
@@ -117,42 +122,75 @@ class StenosisClassifierTab(QWidget):
         self.model_view.GetRenderWindow().Render()
 
     def __preprocessCenterlines(self, centerlines):
-        # retrieve all (global) lines
+        branch_extractor = vmtkscripts.vmtkBranchExtractor()
+        branch_extractor.Centerlines = centerlines
+        branch_extractor.Execute()
+
+        c = branch_extractor.Centerlines
+        writer = vtk.vtkXMLPolyDataWriter()
+        writer.SetInputData(c)
+        writer.SetFileName("C:\\Users\\Pepe Eulzer\\Desktop\\test_data\\centerlines_test.vtp")
+        writer.Update()
+        
+        # lists for each line in centerlines
+        # lines are ordered source->outlet
+        self.c_pos_lists = []   # 3xn numpy arrays with point positions
+        self.c_arc_lists = []   # 1xn numpy arrays with arc length along centerline (accumulated)
+        self.c_radii_lists = [] # 1xn numpy arrays with maximal inscribed sphere radius
+
+        # iterate all (global) lines
         # each line is a vtkIdList containing point ids in the right order
-        lines_ids = []
         l = centerlines.GetLines()        
         l.InitTraversal()
         for i in range(l.GetNumberOfCells()):
             pointIds = vtk.vtkIdList()
             l.GetNextCell(pointIds)
-            lines_ids.append(pointIds)
 
-        # retrieve radius data and split into lines usind the line ids
-        radii_flat = vtk_to_numpy(centerlines.GetPointData().GetArray('MaximumInscribedSphereRadius'))
-        radii_split = []
-        for id_list in lines_ids:
-            radii = np.zeros(id_list.GetNumberOfIds())
-            for i in range(id_list.GetNumberOfIds()):
-                radii[i] = radii_flat[id_list.GetId(i)]
-            radii_split.append(radii)
+            # retrieve position data
+            points = vtk.vtkPoints()
+            centerlines.GetPoints().GetPoints(pointIds, points)
+            p = vtk_to_numpy(points.GetData())
+            self.c_pos_lists.append(p)
 
-        return radii_split
+            # calculate arc len
+            arc = p - np.roll(p, 1, axis=0)
+            arc = np.sqrt((arc*arc).sum(axis=1))
+            arc[0] = 0
+            arc = np.cumsum(arc)
+            self.c_arc_lists.append(arc)
+
+            # retrieve radius data
+            radii_flat = vtk_to_numpy(centerlines.GetPointData().GetArray('MaximumInscribedSphereRadius'))
+            r = np.zeros(pointIds.GetNumberOfIds())
+            for i in range(pointIds.GetNumberOfIds()):
+                r[i] = radii_flat[pointIds.GetId(i)]
+            self.c_radii_lists.append(r)
 
     
     def plot_radii(self):
-        self.lineplot0 = self.widget_lineplots.addPlot()
-        self.lineplot0.setLabel('left', "Minimal Radius (mm)")
-        self.lineplot0.setLabel('bottom', "Branch Length (mm)")
-        self.lineplot0.showGrid(x=False, y=True, alpha=0.2)
+        self.widget_lineplots.clear()
+        lineplot_list = []
+        for i in range(len(self.c_radii_lists)):
+            lineplot = self.widget_lineplots.addPlot()
+            lineplot.setLabel('left', "Minimal Radius (mm)")
+            lineplot.showGrid(x=False, y=True, alpha=0.2)
+            lineplot_list.append(lineplot)
 
-        # correlation color of this glyph in [0,255]
-        # color = (glyph.corr_color * 255.0).astype(np.int16)
-        # color = QColor(color[0], color[1], color[2], 255)
-        color = QColor(0, 0, 0, 255)
+            # correlation color of this glyph in [0,255]
+            # color = (glyph.corr_color * 255.0).astype(np.int16)
+            # color = QColor(color[0], color[1], color[2], 255)
+            color = QColor(0, 0, 0, 255)
+            line = lineplot.plot(x=self.c_arc_lists[i], y=self.c_radii_lists[i], pen=color)
+            
+            self.widget_lineplots.nextRow()
 
-        r = self.radii_split[0]
-        x_axis = np.arange(0, r.shape[0], 1)
-        line = self.lineplot0.plot(x=x_axis, y=r, pen=color)
+        # link axes
+        for i in range(1, len(lineplot_list)):
+            lineplot_list[i].setXLink(lineplot_list[0])
+            lineplot_list[i].setYLink(lineplot_list[0])
+
+        # set label
+        lineplot_list[-1].setLabel('bottom', "Branch Length (mm)")
 
 
     def close(self):
