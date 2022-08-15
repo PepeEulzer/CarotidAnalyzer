@@ -329,15 +329,13 @@ class SegmentationModuleTab(QWidget):
             R[R > 1] = 0
             
         elif self.draw3D == True:  
-            size_z = int(vtk.vtkMath.Ceil(brush_size*self.image.GetSpacing()[2]))  
+            size_z = int(round(brush_size*self.image.GetSpacing()[2]))  
             axis_z = np.arange(-size_z, size_z+1, 1)
             X, Y, Z = np.meshgrid(axis, axis,axis_z)  
             R = X**2 + Y**2 + Z**2
-            print(R)
-            R[R < self.brush_size**2]  = 1  # with this every value in mask less than threshold 
+            R[R < self.brush_size**3]  = 1  # with this every value in mask less than threshold 
             # self.brush_size**2] = 1  # with this ellipsoid (circular when looking along z axis)
             R[R > 1] = 0 
-            print(R)
 
         self.circle_mask = R.astype(np.bool_) 
         self.slice_view.GetRenderWindow().Render()    
