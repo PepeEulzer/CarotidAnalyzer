@@ -22,10 +22,14 @@ class StenosisClassifierTab(QWidget):
     """
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.centerlines = None # raw centerlines (vtkPolyData)
-        self.c_radii_lists = [] # processed centerline radii
-        self.c_pos_lists = []   # processed centerline positions
-        self.c_arc_lists = []   # processed centerline arc length (cumulated)
+        self.min_branch_len = 20 # minimal length of a branch in mm
+        self.branch_cutoff = 5  # length to be cut from branch ends in mm
+
+        self.centerlines = None    # raw centerlines (vtkPolyData)
+        self.c_radii_lists = []    # processed centerline radii
+        self.c_pos_lists = []      # processed centerline positions
+        self.c_arc_lists = []      # processed centerline arc length (cumulated)
+        self.c_parent_indices = [] # index tuples for branch parent / branch point
 
         # model view
         self.model_view = QVTKRenderWindowInteractor(self)
@@ -58,13 +62,7 @@ class StenosisClassifierTab(QWidget):
 
         # centerline vtk pipeline
         self.reader_centerline = vtk.vtkXMLPolyDataReader()
-        self.mapper_centerline = vtk.vtkPolyDataMapper()
-        self.mapper_centerline.SetInputConnection(self.reader_centerline.GetOutputPort())
-        self.actor_centerline = vtk.vtkActor()
-        self.actor_centerline.SetMapper(self.mapper_centerline)
-        self.actor_centerline.GetProperty().SetColor(0,0,0)
-        self.actor_centerline.GetProperty().SetLineWidth(3)
-        self.actor_centerline.GetProperty().RenderLinesAsTubesOn()
+        self.centerline_actors = []
 
         # other vtk props
         self.text_patient = vtk.vtkTextActor()
@@ -104,16 +102,17 @@ class StenosisClassifierTab(QWidget):
             self.reader_centerline.SetFileName("")
             self.reader_centerline.SetFileName(centerline_file)
             self.reader_centerline.Update()
-            self.mapper_centerline.SetInputConnection(self.reader_centerline.GetOutputPort())
-            self.renderer.AddActor(self.actor_centerline)
             self.centerlines = self.reader_centerline.GetOutput()
-            self.__preprocessCenterlines(self.centerlines)
+            self.__preprocessCenterlines()
             self.plot_radii()
+            self.draw_active_centerlines()
 
         else:
             # clear all
             self.renderer.RemoveActor(self.actor_lumen)
-            self.renderer.RemoveActor(self.actor_centerline)
+            for actor in self.centerline_actors:
+                self.renderer.RemoveActor(actor)
+            self.centerline_actors = []
             self.centerlines = None
             self.text_patient.SetInput("No lumen or centerlines file found for this side.")
 
@@ -121,26 +120,17 @@ class StenosisClassifierTab(QWidget):
         self.renderer.ResetCamera()
         self.model_view.GetRenderWindow().Render()
 
-    def __preprocessCenterlines(self, centerlines):
-        branch_extractor = vmtkscripts.vmtkBranchExtractor()
-        branch_extractor.Centerlines = centerlines
-        branch_extractor.Execute()
-
-        c = branch_extractor.Centerlines
-        writer = vtk.vtkXMLPolyDataWriter()
-        writer.SetInputData(c)
-        writer.SetFileName("C:\\Users\\Pepe Eulzer\\Desktop\\test_data\\centerlines_test.vtp")
-        writer.Update()
-        
+    def __preprocessCenterlines(self):
         # lists for each line in centerlines
         # lines are ordered source->outlet
-        self.c_pos_lists = []   # 3xn numpy arrays with point positions
-        self.c_arc_lists = []   # 1xn numpy arrays with arc length along centerline (accumulated)
-        self.c_radii_lists = [] # 1xn numpy arrays with maximal inscribed sphere radius
+        self.c_pos_lists = []      # 3xn numpy arrays with point positions
+        self.c_arc_lists = []      # 1xn numpy arrays with arc length along centerline (accumulated)
+        self.c_radii_lists = []    # 1xn numpy arrays with maximal inscribed sphere radius
+        self.c_parent_indices = [] # tuple per list: (parent idx, branch point idx)
 
         # iterate all (global) lines
         # each line is a vtkIdList containing point ids in the right order
-        l = centerlines.GetLines()        
+        l = self.centerlines.GetLines()        
         l.InitTraversal()
         for i in range(l.GetNumberOfCells()):
             pointIds = vtk.vtkIdList()
@@ -148,23 +138,67 @@ class StenosisClassifierTab(QWidget):
 
             # retrieve position data
             points = vtk.vtkPoints()
-            centerlines.GetPoints().GetPoints(pointIds, points)
+            self.centerlines.GetPoints().GetPoints(pointIds, points)
             p = vtk_to_numpy(points.GetData())
-            self.c_pos_lists.append(p)
 
             # calculate arc len
             arc = p - np.roll(p, 1, axis=0)
             arc = np.sqrt((arc*arc).sum(axis=1))
             arc[0] = 0
             arc = np.cumsum(arc)
-            self.c_arc_lists.append(arc)
 
             # retrieve radius data
-            radii_flat = vtk_to_numpy(centerlines.GetPointData().GetArray('MaximumInscribedSphereRadius'))
+            radii_flat = vtk_to_numpy(self.centerlines.GetPointData().GetArray('MaximumInscribedSphereRadius'))
             r = np.zeros(pointIds.GetNumberOfIds())
-            for i in range(pointIds.GetNumberOfIds()):
-                r[i] = radii_flat[pointIds.GetId(i)]
+            for j in range(pointIds.GetNumberOfIds()):
+                r[j] = radii_flat[pointIds.GetId(j)]
+
+            # add to centerlines
+            self.c_pos_lists.append(p)
+            self.c_arc_lists.append(arc)
             self.c_radii_lists.append(r)
+            self.c_parent_indices.append((i,0)) # points to own origin
+
+        # cleanup branch overlaps
+        # (otherwise each line starts at the inlet)
+        for i in range(0, len(self.c_pos_lists)):
+            for j in range(i+1, len(self.c_pos_lists)):
+                len0 = self.c_pos_lists[i].shape[0]
+                len1 = self.c_pos_lists[j].shape[0]
+                if len0 < len1:
+                    overlap_mask = np.not_equal(self.c_pos_lists[i], self.c_pos_lists[j][:len0])
+                else:
+                    overlap_mask = np.not_equal(self.c_pos_lists[i][:len1], self.c_pos_lists[j])
+                overlap_mask = np.all(overlap_mask, axis=1) # AND over tuples
+                split_index = np.searchsorted(overlap_mask, True) # first position where lines diverge
+
+                if split_index <= 0:
+                    continue # no new parent was found
+
+                # save parent and position
+                self.c_parent_indices[j] = (i,split_index)
+                
+                # clip line to remove overlaps
+                self.c_pos_lists[j] = self.c_pos_lists[j][split_index:]
+                self.c_arc_lists[j] = self.c_arc_lists[j][split_index:]
+                self.c_radii_lists[j] = self.c_radii_lists[j][split_index:]
+
+        # remove branches below the minimum length
+        for i in range(len(self.c_arc_lists)-1, -1, -1):
+            if self.c_arc_lists[i][-1] - self.c_arc_lists[i][0] < self.min_branch_len:
+                del self.c_pos_lists[i]
+                del self.c_arc_lists[i]
+                del self.c_radii_lists[i]
+                del self.c_parent_indices[i]
+
+        # clip branch ends
+        for i in range(len(self.c_arc_lists)):
+            start = self.c_arc_lists[i][0] + self.branch_cutoff
+            end = self.c_arc_lists[i][-1] - self.branch_cutoff
+            clip_ids = np.searchsorted(self.c_arc_lists[i], [start, end])
+            self.c_pos_lists[i] = self.c_pos_lists[i][clip_ids[0]:clip_ids[1]]
+            self.c_arc_lists[i] = self.c_arc_lists[i][clip_ids[0]:clip_ids[1]]
+            self.c_radii_lists[i] = self.c_radii_lists[i][clip_ids[0]:clip_ids[1]]
 
     
     def plot_radii(self):
@@ -180,17 +214,69 @@ class StenosisClassifierTab(QWidget):
             # color = (glyph.corr_color * 255.0).astype(np.int16)
             # color = QColor(color[0], color[1], color[2], 255)
             color = QColor(0, 0, 0, 255)
-            line = lineplot.plot(x=self.c_arc_lists[i], y=self.c_radii_lists[i], pen=color)
-            
+            lineplot.plot(x=self.c_arc_lists[i], y=self.c_radii_lists[i], pen=color)
+
+            # mark origin of subbranches
+            subbranch_ids = [y for x,y in self.c_parent_indices if x==i and y!=0]
+            for id in subbranch_ids:
+                p = self.c_arc_lists[i][id]
+                lineplot.addItem(pg.InfiniteLine(pos=p, angle=90, label="2", pen=color))
+
+            # draw horizontal sliders
+            subbranch_ids.insert(0, 0) # line start id
+            subbranch_ids.append(len(self.c_arc_lists[i])-1) # line end id
+            for j in range(len(subbranch_ids)-1):
+                id0 = subbranch_ids[j]
+                id1 = subbranch_ids[j+1]
+                mean_y = np.mean(self.c_radii_lists[i][id0:id1])
+                bounds0 = self.c_arc_lists[i][id0]
+                bounds1 = self.c_arc_lists[i][id1]
+                slider_line = pg.InfiniteLine(pos=mean_y, angle=0, movable=True)
+                #lineplot.addItem(slider_line)
+
             self.widget_lineplots.nextRow()
 
         # link axes
         for i in range(1, len(lineplot_list)):
             lineplot_list[i].setXLink(lineplot_list[0])
-            lineplot_list[i].setYLink(lineplot_list[0])
+            #lineplot_list[i].setYLink(lineplot_list[0])
 
         # set label
         lineplot_list[-1].setLabel('bottom', "Branch Length (mm)")
+
+    
+    def draw_active_centerlines(self):
+        # clear any existing centerline actors
+        for actor in self.centerline_actors:
+            self.renderer.RemoveActor(actor)
+        self.centerline_actors = []
+        
+        for point_list in self.c_pos_lists:
+            points = vtk.vtkPoints()
+            for p in point_list.tolist():
+                points.InsertNextPoint(p)
+            
+            lines = vtk.vtkCellArray()
+            for i in range(points.GetNumberOfPoints()-1):
+                line = vtk.vtkLine()
+                line.GetPointIds().SetId(0,i)
+                line.GetPointIds().SetId(1, i+1)
+                lines.InsertNextCell(line)
+
+            polyData = vtk.vtkPolyData()
+            polyData.SetPoints(points)
+            polyData.SetLines(lines)
+
+            mapper = vtk.vtkPolyDataMapper()
+            mapper.SetInputData(polyData)
+            actor = vtk.vtkActor()
+            actor.SetMapper(mapper)
+            actor.GetProperty().SetColor(0,0,0)
+            actor.GetProperty().SetLineWidth(3)
+            actor.GetProperty().RenderLinesAsTubesOn()
+
+            self.renderer.AddActor(actor)
+            self.centerline_actors.append(actor)
 
 
     def close(self):
