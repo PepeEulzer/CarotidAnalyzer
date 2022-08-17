@@ -1,12 +1,14 @@
 import os
+from re import M
+from statistics import mean
 
 import numpy as np
 import vtk
 from vtk.util.numpy_support import vtk_to_numpy
 from vtk.qt.QVTKRenderWindowInteractor import QVTKRenderWindowInteractor
-from vmtk import vmtkscripts
 from PyQt5.QtWidgets import QWidget, QHBoxLayout, QTabWidget
-from PyQt5.QtGui import QColor
+from PyQt5.QtGui import QColor, QPainterPath
+from PyQt5.QtCore import Qt, pyqtSignal, QRectF, QLineF
 import pyqtgraph as pg
 
 from defaults import *
@@ -15,6 +17,41 @@ from defaults import *
 pg.setConfigOption('background', 'w')
 pg.setConfigOption('foreground', 'k')
 pg.setConfigOption('antialias', True)
+
+# quantitative colors
+LINE_COLORS = [(27,158,119),
+               (217,95,2),
+               (117,112,179),
+               (231,41,138),
+               (102,166,30)]
+LINE_COLORS_QT = [QColor(c[0], c[1], c[2]) for c in LINE_COLORS]
+LINE_COLORS_VTK = [(c[0]/255, c[1]/255, c[2]/255) for c in LINE_COLORS]
+
+
+class LineROI(pg.InfiniteLine):
+    """
+    Infinite line that stops at branch boundaries in radius plots.
+    """
+def boundingRect(self):
+        if self._boundingRect is None:
+            #br = UIGraphicsItem.boundingRect(self)
+            br = self.viewRect()
+            if br is None:
+                return QRectF()
+            
+            ## add a 4-pixel radius around the line for mouse interaction.
+            px = self.pixelLength(direction=pg.Point(1,0), ortho=True)  ## get pixel length orthogonal to the line
+            if px is None:
+                px = 0
+            w = (max(4, self.pen.width()/2, self.hoverPen.width()/2)+1) * px
+            br.setBottom(-w)
+            br.setTop(w)
+            
+            br = br.normalized()
+            self._boundingRect = br
+            self._line = QLineF(br.right(), 0.0, br.left(), 0.0)
+        return self._boundingRect
+
 
 class StenosisClassifierTab(QWidget):
     """
@@ -57,8 +94,10 @@ class StenosisClassifierTab(QWidget):
         self.mapper_lumen.SetInputConnection(self.reader_lumen.GetOutputPort())
         self.actor_lumen = vtk.vtkActor()
         self.actor_lumen.SetMapper(self.mapper_lumen)
-        self.actor_lumen.GetProperty().SetColor(COLOR_LUMEN)
-        self.actor_lumen.GetProperty().SetOpacity(0.3)
+        # self.actor_lumen.GetProperty().SetColor(COLOR_LUMEN)
+        self.actor_lumen.GetProperty().SetColor(1,1,1)
+        self.actor_lumen.GetProperty().SetOpacity(0.7)
+        self.actor_lumen.GetProperty().FrontfaceCullingOn()
 
         # centerline vtk pipeline
         self.reader_centerline = vtk.vtkXMLPolyDataReader()
@@ -210,17 +249,14 @@ class StenosisClassifierTab(QWidget):
             lineplot.showGrid(x=False, y=True, alpha=0.2)
             lineplot_list.append(lineplot)
 
-            # correlation color of this glyph in [0,255]
-            # color = (glyph.corr_color * 255.0).astype(np.int16)
-            # color = QColor(color[0], color[1], color[2], 255)
-            color = QColor(0, 0, 0, 255)
-            lineplot.plot(x=self.c_arc_lists[i], y=self.c_radii_lists[i], pen=color)
+            # draw radius lineplot
+            lineplot_rad = lineplot.plot(x=self.c_arc_lists[i], y=self.c_radii_lists[i], pen=LINE_COLORS_QT[i])
 
             # mark origin of subbranches
             subbranch_ids = [y for x,y in self.c_parent_indices if x==i and y!=0]
             for id in subbranch_ids:
                 p = self.c_arc_lists[i][id]
-                lineplot.addItem(pg.InfiniteLine(pos=p, angle=90, label="2", pen=color))
+                lineplot.addItem(pg.InfiniteLine(pos=p, angle=90, pen=LINE_COLORS_QT[i+1]))
 
             # draw horizontal sliders
             subbranch_ids.insert(0, 0) # line start id
@@ -231,8 +267,9 @@ class StenosisClassifierTab(QWidget):
                 mean_y = np.mean(self.c_radii_lists[i][id0:id1])
                 bounds0 = self.c_arc_lists[i][id0]
                 bounds1 = self.c_arc_lists[i][id1]
-                slider_line = pg.InfiniteLine(pos=mean_y, angle=0, movable=True)
-                #lineplot.addItem(slider_line)
+
+                selection_line = LineROI(pos=mean_y, angle=0, movable=True)
+                lineplot.addItem(selection_line)
 
             self.widget_lineplots.nextRow()
 
@@ -251,16 +288,16 @@ class StenosisClassifierTab(QWidget):
             self.renderer.RemoveActor(actor)
         self.centerline_actors = []
         
-        for point_list in self.c_pos_lists:
+        for i in range(len(self.c_pos_lists)):
             points = vtk.vtkPoints()
-            for p in point_list.tolist():
+            for p in self.c_pos_lists[i].tolist():
                 points.InsertNextPoint(p)
             
             lines = vtk.vtkCellArray()
-            for i in range(points.GetNumberOfPoints()-1):
+            for j in range(points.GetNumberOfPoints()-1):
                 line = vtk.vtkLine()
-                line.GetPointIds().SetId(0,i)
-                line.GetPointIds().SetId(1, i+1)
+                line.GetPointIds().SetId(0,j)
+                line.GetPointIds().SetId(1, j+1)
                 lines.InsertNextCell(line)
 
             polyData = vtk.vtkPolyData()
@@ -271,7 +308,7 @@ class StenosisClassifierTab(QWidget):
             mapper.SetInputData(polyData)
             actor = vtk.vtkActor()
             actor.SetMapper(mapper)
-            actor.GetProperty().SetColor(0,0,0)
+            actor.GetProperty().SetColor(LINE_COLORS_VTK[i])
             actor.GetProperty().SetLineWidth(3)
             actor.GetProperty().RenderLinesAsTubesOn()
 
