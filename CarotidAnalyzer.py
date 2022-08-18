@@ -188,6 +188,9 @@ class CarotidAnalyzer(QMainWindow, Ui_MainWindow):
     def loadSelectedPatient(self):
         # get top parent item
         selected = self.tree_widget_data.currentItem()
+        if selected == None:
+            return
+            
         while selected.parent() != None:
             selected = selected.parent()
 

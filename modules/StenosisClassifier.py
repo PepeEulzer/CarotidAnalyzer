@@ -30,27 +30,55 @@ LINE_COLORS_VTK = [(c[0]/255, c[1]/255, c[2]/255) for c in LINE_COLORS]
 
 class LineROI(pg.InfiniteLine):
     """
-    Infinite line that stops at branch boundaries in radius plots.
+    Draggable horizontal line that stops at branch boundaries in radius plots.
     """
-def boundingRect(self):
+    def __init__(self, plot_id, x_start, x_end, y_pos=None, angle=90, pen=None, movable=False, y_bounds=None,
+                 hoverPen=None, label=None, labelOpts=None, name=None):
+        self.plot_id = plot_id
+        self.x_start = x_start
+        self.x_end = x_end
+        super().__init__(y_pos, angle, pen, movable, y_bounds, hoverPen, label, labelOpts, name)
+
+
+    def boundingRect(self):
         if self._boundingRect is None:
-            #br = UIGraphicsItem.boundingRect(self)
             br = self.viewRect()
             if br is None:
                 return QRectF()
             
-            ## add a 4-pixel radius around the line for mouse interaction.
-            px = self.pixelLength(direction=pg.Point(1,0), ortho=True)  ## get pixel length orthogonal to the line
+            # add a 4-pixel radius around the line for mouse interaction.
+            px = self.pixelLength(direction=pg.Point(1,0), ortho=True)  # get pixel length orthogonal to the line
             if px is None:
                 px = 0
             w = (max(4, self.pen.width()/2, self.hoverPen.width()/2)+1) * px
             br.setBottom(-w)
             br.setTop(w)
+            br.setRight(self.x_end)
+            br.setLeft(self.x_start)
             
             br = br.normalized()
             self._boundingRect = br
             self._line = QLineF(br.right(), 0.0, br.left(), 0.0)
         return self._boundingRect
+
+    def mouseDragEvent(self, ev):
+        if self.movable and ev.button() == Qt.LeftButton:
+            if ev.isStart():
+                self.moving = True
+                self.cursorOffset = self.pos() - self.mapToParent(ev.buttonDownPos())
+                self.startPosition = self.pos()
+            ev.accept()
+
+            if not self.moving:
+                return
+
+            new_pos = self.cursorOffset + self.mapToParent(ev.pos())
+            new_pos.setX(self.pos().x())
+            self.setPos(new_pos)
+            self.sigDragged.emit(self)
+            if ev.isFinish():
+                self.moving = False
+                self.sigPositionChangeFinished.emit(self)
 
 
 class StenosisClassifierTab(QWidget):
@@ -60,7 +88,7 @@ class StenosisClassifierTab(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.min_branch_len = 20 # minimal length of a branch in mm
-        self.branch_cutoff = 5  # length to be cut from branch ends in mm
+        self.branch_cutoff = 2  # length to be cut from branch ends in mm
 
         self.centerlines = None    # raw centerlines (vtkPolyData)
         self.c_radii_lists = []    # processed centerline radii
@@ -82,6 +110,8 @@ class StenosisClassifierTab(QWidget):
         # graph view
         self.widget_lineplots = pg.GraphicsLayoutWidget()
         self.lineplots = []
+        self.scatterplots_down = []
+        self.scatterplots_up = []
 
         # combine all in a layout
         self.top_layout = QHBoxLayout(self)
@@ -242,18 +272,26 @@ class StenosisClassifierTab(QWidget):
     
     def plot_radii(self):
         self.widget_lineplots.clear()
-        lineplot_list = []
+        self.lineplots = []
+        self.scatterplots_down = []
+        self.scatterplots_up = []
+        
         for i in range(len(self.c_radii_lists)):
             lineplot = self.widget_lineplots.addPlot()
             lineplot.setLabel('left', "Minimal Radius (mm)")
             lineplot.showGrid(x=False, y=True, alpha=0.2)
-            lineplot_list.append(lineplot)
+            self.lineplots.append(lineplot)
+
+            s = lineplot.plot([], [], pen=None, symbolBrush=(255, 0, 0))
+            self.scatterplots_down.append(s)
+            s = lineplot.plot([], [], pen=None, symbolBrush=(0, 255, 0))
+            self.scatterplots_up.append(s)
 
             # draw radius lineplot
-            lineplot_rad = lineplot.plot(x=self.c_arc_lists[i], y=self.c_radii_lists[i], pen=LINE_COLORS_QT[i])
+            lineplot.plot(x=self.c_arc_lists[i], y=self.c_radii_lists[i], pen=LINE_COLORS_QT[i])
 
             # mark origin of subbranches
-            subbranch_ids = [y for x,y in self.c_parent_indices if x==i and y!=0]
+            subbranch_ids = sorted([y for x,y in self.c_parent_indices if x==i and y!=0])
             for id in subbranch_ids:
                 p = self.c_arc_lists[i][id]
                 lineplot.addItem(pg.InfiniteLine(pos=p, angle=90, pen=LINE_COLORS_QT[i+1]))
@@ -264,22 +302,25 @@ class StenosisClassifierTab(QWidget):
             for j in range(len(subbranch_ids)-1):
                 id0 = subbranch_ids[j]
                 id1 = subbranch_ids[j+1]
+                x_min = self.c_arc_lists[i][id0]
+                x_max = self.c_arc_lists[i][id1]
                 mean_y = np.mean(self.c_radii_lists[i][id0:id1])
-                bounds0 = self.c_arc_lists[i][id0]
-                bounds1 = self.c_arc_lists[i][id1]
-
-                selection_line = LineROI(pos=mean_y, angle=0, movable=True)
+                min_y = np.min(self.c_radii_lists[i][id0:id1])
+                min_y -= 0.01 * (mean_y-min_y) # small offset below lowest value
+                selection_line = LineROI(i, x_min, x_max, y_pos=min_y, y_bounds=[min_y, mean_y], angle=0, movable=True)
                 lineplot.addItem(selection_line)
+                selection_line.sigPositionChanged[object].connect(self.lineROIposChanged)
 
+            # next graph
             self.widget_lineplots.nextRow()
 
         # link axes
-        for i in range(1, len(lineplot_list)):
-            lineplot_list[i].setXLink(lineplot_list[0])
-            #lineplot_list[i].setYLink(lineplot_list[0])
+        for i in range(1, len(self.lineplots)):
+            self.lineplots[i].setXLink(self.lineplots[0])
+            #self.lineplots[i].setYLink(self.lineplots[0])
 
         # set label
-        lineplot_list[-1].setLabel('bottom', "Branch Length (mm)")
+        self.lineplots[-1].setLabel('bottom', "Branch Length (mm)")
 
     
     def draw_active_centerlines(self):
@@ -314,6 +355,26 @@ class StenosisClassifierTab(QWidget):
 
             self.renderer.AddActor(actor)
             self.centerline_actors.append(actor)
+
+
+    def lineROIposChanged(self, lineROI):
+        arc_lengths = self.c_arc_lists[lineROI.plot_id]
+        r_thresh = lineROI.getYPos()
+
+        start_index = np.searchsorted(arc_lengths, lineROI.x_start)
+        end_index = np.searchsorted(arc_lengths, lineROI.x_end) + 1
+        radii = self.c_radii_lists[lineROI.plot_id][start_index:end_index]
+        radii_ranges = np.where(radii < r_thresh, 0, 1)
+        radii_ranges[-1] = 1 # closes open ends
+        radii_ranges = radii_ranges - np.roll(radii_ranges, 1)
+        indices_up = np.where(radii_ranges == 1)[0] + start_index
+        indices_down = np.where(radii_ranges == -1)[0] + start_index
+
+        # update debugging plots
+        down_plot = self.scatterplots_down[lineROI.plot_id]
+        down_plot.setData(arc_lengths[indices_down], np.full(indices_down.size, r_thresh))
+        up_plot = self.scatterplots_up[lineROI.plot_id]
+        up_plot.setData(arc_lengths[indices_up], np.full(indices_up.size, r_thresh))
 
 
     def close(self):
