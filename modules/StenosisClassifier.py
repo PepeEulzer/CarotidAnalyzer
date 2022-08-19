@@ -1,5 +1,5 @@
 import os
-from re import M
+from re import M, sub
 from statistics import mean
 
 import numpy as np
@@ -37,8 +37,6 @@ class LineROI(pg.InfiniteLine):
         self.plot_id = plot_id
         self.x_start = x_start
         self.x_end = x_end
-        indices_down = []
-        indices_up = []
         super().__init__(y_pos, angle, pen, movable, y_bounds, hoverPen, label, labelOpts, name)
 
 
@@ -98,7 +96,6 @@ class StenosisClassifierTab(QWidget):
         self.c_arc_lists = []       # processed centerline arc length (cumulated)
         self.c_parent_indices = []  # index tuples for branch parent / branch point
         self.c_stenosis_actors = [] # lists of stenosis actors per centerline
-        self.tube_actors = []       # list of tube actors (visible during dragging)
 
         # model view
         self.model_view = QVTKRenderWindowInteractor(self)
@@ -128,7 +125,6 @@ class StenosisClassifierTab(QWidget):
         self.mapper_lumen.SetInputConnection(self.reader_lumen.GetOutputPort())
         self.actor_lumen = vtk.vtkActor()
         self.actor_lumen.SetMapper(self.mapper_lumen)
-        # self.actor_lumen.GetProperty().SetColor(COLOR_LUMEN)
         self.actor_lumen.GetProperty().SetColor(1,1,1)
         self.actor_lumen.GetProperty().SetOpacity(0.7)
         self.actor_lumen.GetProperty().FrontfaceCullingOn()
@@ -295,13 +291,16 @@ class StenosisClassifierTab(QWidget):
             self.scatterplots_up.append(s)
 
             # draw radius lineplot
-            lineplot.plot(x=self.c_arc_lists[i], y=self.c_radii_lists[i], pen=LINE_COLORS_QT[i])
+            lineplot.plot(x=self.c_arc_lists[i], y=self.c_radii_lists[i], pen=LINE_COLORS_QT[i%5])
 
             # mark origin of subbranches
-            subbranch_ids = sorted([y for x,y in self.c_parent_indices if x==i and y!=0])
-            for id in subbranch_ids:
-                p = self.c_arc_lists[i][id]
-                lineplot.addItem(pg.InfiniteLine(pos=p, angle=90, pen=LINE_COLORS_QT[i+1]))
+            subbranch_ids = []
+            for j, index_tuple in enumerate(self.c_parent_indices):
+                if index_tuple[0] == i and index_tuple[1] != 0:
+                    subbranch_ids.append(index_tuple[1])
+                    p = self.c_arc_lists[i][index_tuple[1]]
+                    lineplot.addItem(pg.InfiniteLine(pos=p, angle=90, pen=LINE_COLORS_QT[j%5]))
+            subbranch_ids = sorted(subbranch_ids)
 
             # draw horizontal sliders
             subbranch_ids.insert(0, 0) # line start id
@@ -317,7 +316,6 @@ class StenosisClassifierTab(QWidget):
                 selection_line = LineROI(i, x_min, x_max, y_pos=min_y, y_bounds=[min_y, mean_y], angle=0, movable=True)
                 lineplot.addItem(selection_line)
                 selection_line.sigPositionChanged[object].connect(self.lineROIposChanged)
-                selection_line.sigPositionChangeFinished[object].connect(self.lineROIposChangeFinished)
 
             # next graph
             self.widget_lineplots.nextRow()
@@ -325,7 +323,6 @@ class StenosisClassifierTab(QWidget):
         # link axes
         for i in range(1, len(self.lineplots)):
             self.lineplots[i].setXLink(self.lineplots[0])
-            #self.lineplots[i].setYLink(self.lineplots[0])
 
         # set label
         self.lineplots[-1].setLabel('bottom', "Branch Length (mm)")
@@ -357,7 +354,7 @@ class StenosisClassifierTab(QWidget):
             mapper.SetInputData(polyData)
             actor = vtk.vtkActor()
             actor.SetMapper(mapper)
-            actor.GetProperty().SetColor(LINE_COLORS_VTK[i])
+            actor.GetProperty().SetColor(LINE_COLORS_VTK[i%5])
             actor.GetProperty().SetLineWidth(3)
             actor.GetProperty().RenderLinesAsTubesOn()
 
@@ -365,17 +362,12 @@ class StenosisClassifierTab(QWidget):
             self.centerline_actors.append(actor)
 
     
-    def clearTubeActors(self):
-        for actor in self.tube_actors:
-            self.renderer.RemoveActor(actor)
-        self.tube_actors.clear()
-
-    
     def clearStenosisActors(self):
         for actor_list in self.c_stenosis_actors:
-            for actor in actor_list:
-                self.renderer.RemoveActor(actor)
+            for actor_tuple in actor_list:
+                self.renderer.RemoveActor(actor_tuple[0])
         self.c_stenosis_actors.clear()
+
 
     def lineROIposChanged(self, lineROI):
         arc_lengths = self.c_arc_lists[lineROI.plot_id]
@@ -389,53 +381,27 @@ class StenosisClassifierTab(QWidget):
         radii_ranges = radii_ranges - np.roll(radii_ranges, 1)
 
         # compute threshold indices, save in lineROI for later use
-        lineROI.indices_down = np.where(radii_ranges == -1)[0] + start_index
-        lineROI.indices_up = np.where(radii_ranges == 1)[0] + start_index
-        nr_stenoses = lineROI.indices_down.size
-        assert nr_stenoses == lineROI.indices_up.size
+        indices_down = np.where(radii_ranges == -1)[0] + start_index
+        indices_up = np.where(radii_ranges == 1)[0] + start_index
+        nr_stenoses = indices_down.size
+        assert nr_stenoses == indices_up.size
 
         # update debugging plots
         down_plot = self.scatterplots_down[lineROI.plot_id]
-        down_plot.setData(arc_lengths[lineROI.indices_down], np.full(nr_stenoses, r_thresh))
+        down_plot.setData(arc_lengths[indices_down], np.full(nr_stenoses, r_thresh))
         up_plot = self.scatterplots_up[lineROI.plot_id]
-        up_plot.setData(arc_lengths[lineROI.indices_up], np.full(lineROI.indices_up.size, r_thresh))
+        up_plot.setData(arc_lengths[indices_up], np.full(indices_up.size, r_thresh))
 
-        # display 3D regions to be cut
-        self.clearTubeActors()
-        for i in range(nr_stenoses):
-            r = self.c_radii_lists[lineROI.plot_id][lineROI.indices_down[i]]
-            p1 = self.c_pos_lists[lineROI.plot_id][lineROI.indices_down[i]]
-            p2 = self.c_pos_lists[lineROI.plot_id][lineROI.indices_up[i]]
-            line_source = vtk.vtkLineSource()
-            line_source.SetPoint1(p1)
-            line_source.SetPoint2(p2)
-            tube_filter = vtk.vtkTubeFilter()
-            tube_filter.SetInputConnection(line_source.GetOutputPort())
-            tube_filter.SetRadius(r*1.5)
-            tube_filter.SetNumberOfSides(20)
-
-            mapper = vtk.vtkPolyDataMapper()
-            mapper.SetInputConnection(tube_filter.GetOutputPort())
-            actor = vtk.vtkActor()
-            actor.SetMapper(mapper)
-            actor.GetProperty().SetColor(1, 1, 0)
-            actor.GetProperty().SetOpacity(0.5)
-            self.tube_actors.append(actor)
-            self.renderer.AddActor(actor)
-        self.model_view.GetRenderWindow().Render()
-
-    
-    def lineROIposChangeFinished(self, lineROI):
-        # cleanup actors
-        self.clearTubeActors()
-        for actor in self.c_stenosis_actors[lineROI.plot_id]:
-            self.renderer.RemoveActor(actor)
-        self.c_stenosis_actors[lineROI.plot_id].clear()
+        # cleanup actors if start index is same
+        for actor_tuple in self.c_stenosis_actors[lineROI.plot_id]:
+            if actor_tuple[1] == start_index:
+                self.renderer.RemoveActor(actor_tuple[0])
+        self.c_stenosis_actors[lineROI.plot_id] = [t for t in self.c_stenosis_actors[lineROI.plot_id] if t[1] != start_index]
 
         # create cut for each case
-        for i in range(lineROI.indices_down.size):
-            idx1 = lineROI.indices_down[i]
-            idx2 = lineROI.indices_up[i]
+        for i in range(indices_down.size):
+            idx1 = indices_down[i]
+            idx2 = indices_up[i]
             pos = self.c_pos_lists[lineROI.plot_id]
             
             # catch if too close to branch end
@@ -482,8 +448,9 @@ class StenosisClassifierTab(QWidget):
             actor.SetMapper(mapper)
             actor.GetProperty().SetColor(COLOR_LUMEN)
             actor.GetProperty().SetOpacity(1.0)
-            self.c_stenosis_actors[lineROI.plot_id].append(actor)
+            self.c_stenosis_actors[lineROI.plot_id].append((actor, start_index))
             self.renderer.AddActor(actor)
+
         self.model_view.GetRenderWindow().Render()
 
 
