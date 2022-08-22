@@ -45,7 +45,7 @@ class SegmentationModuleTab(QWidget):
         self.eraser_button = QPushButton("Eraser")
         self.brush_size_slider = QSlider(Qt.Horizontal)  
         self.brush_size_slider.setMinimum(1)
-        self.brush_size_slider.setMaximum(31)
+        self.brush_size_slider.setMaximum(51)
         self.brush_size_slider.setSingleStep(2)
         self.brush_size_slider.setValue(15)
         self.brush_size_slider.setTickInterval(1)
@@ -330,15 +330,15 @@ class SegmentationModuleTab(QWidget):
   
         elif self.draw3D == True:  
             z_scaling = self.image.GetSpacing()[2]/self.image.GetSpacing()[0]
-            size_z = int(round(self.brush_size*z_scaling)) 
-            X, Y, Z = np.meshgrid(axis, axis, axis) 
-            Z = np.rint(Z*z_scaling)
+            self.brush_z = int(round(self.brush_size/z_scaling))
+            axis_z = np.arange(-self.brush_z, self.brush_z+1, 1)
+            z_axis = np.rint(axis_z*z_scaling)
+            X, Y, Z = np.meshgrid(axis, axis, z_axis) 
             R = X**2 + Y**2 + Z**2
             R[R < self.brush_size**2]  = 1 
             R[R > 1] = 0 
-
         self.circle_mask = R.astype(np.bool_) 
-        self.slice_view.GetRenderWindow().Render()    
+        self.slice_view.GetRenderWindow().Render()   
 
     def set2DBrush(self):
         self.draw3D = False
@@ -426,6 +426,7 @@ class SegmentationModuleTab(QWidget):
             return
 
         s = self.brush_size
+        s_z = self.brush_z 
         x0 = max(x-s, 0)
         x1 = min(x+s+1, self.label_map_data.shape[0])
         y0 = max(y-s, 0)
@@ -437,9 +438,9 @@ class SegmentationModuleTab(QWidget):
             
         else: 
             # draw sphere
-            z0 = max(z-s, 0)
-            z1 = min(z+s+1, self.label_map_data.shape[2])
-            mask = self.circle_mask[x0-x+s:x1-x+s, y0-y+s:y1-y+s, z0-z+s:z1-z+s] # crop sphere mask at borders
+            z0 = max(z-s_z, 0)
+            z1 = min(z+s_z+1, self.label_map_data.shape[2])
+            mask = self.circle_mask[x0-x+s:x1-x+s, y0-y+s:y1-y+s, z0-z+s_z:z1-z+s_z] # crop sphere mask at borders
             self.label_map_data[x0:x1,y0:y1,z0:z1][mask] = self.draw_value
             
         # update the label map (shallow copies make this efficient)   
