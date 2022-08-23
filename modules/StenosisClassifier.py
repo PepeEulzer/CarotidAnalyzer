@@ -83,19 +83,122 @@ class StenosisWrapper(object):
     """
     Keeps track of all actors/graph objects needed to display one stenosis.
     """
-    def __init__(self, vtk_renderer, pg_graph, start_index, vtk_stenosis_actor, vtk_text_actor):
+    def __init__(self, vtk_renderer, lineplot, lineROI,
+                 vessel_geometry, pos_array, rad_array, arc_array, start_index, idx1, idx2):
         self.vtk_renderer = vtk_renderer
-        self.pg_graph = pg_graph
+        self.lineplot = lineplot
         self.start_index = start_index
-        self.vtk_stenosis_actor = vtk_stenosis_actor
-        self.vtk_text_actor = vtk_text_actor
+        self.pos = pos_array
+        self.rad = rad_array
+        self.arc = arc_array
 
-        self.vtk_renderer.AddActor(self.vtk_stenosis_actor)
-        self.vtk_renderer.AddActor(self.vtk_text_actor)
+        # compute normals
+        n1 = np.mean(self.pos[idx1:idx1+6], axis=0) - np.mean(self.pos[idx1-5:idx1+1], axis=0)
+        n2 = np.mean(self.pos[idx2-5:idx2+1], axis=0) - np.mean(self.pos[idx2:idx2+6], axis=0)
+
+        # cut lower end
+        plane = vtk.vtkPlane()
+        plane.SetOrigin(self.pos[idx1])
+        plane.SetNormal(n1)
+        clipper = vtk.vtkClipPolyData()
+        clipper.SetInputDataObject(vessel_geometry)
+        clipper.SetClipFunction(plane)
+        clipper.SetInsideOut(False)
+        clipper.Update()
+        clipped = clipper.GetOutput()
+
+        # cut upper end
+        plane = vtk.vtkPlane()
+        plane.SetOrigin(self.pos[idx2])
+        plane.SetNormal(n2)
+        clipper = vtk.vtkClipPolyData()
+        clipper.SetInputDataObject(clipped)
+        clipper.SetClipFunction(plane)
+        clipper.SetInsideOut(False)
+        clipper.Update()
+
+        # remove unwanted branches
+        connectivityFilter = vtk.vtkConnectivityFilter()
+        connectivityFilter.SetInputConnection(clipper.GetOutputPort())
+        connectivityFilter.SetClosestPoint(self.pos[idx1])
+        connectivityFilter.SetExtractionModeToClosestPointRegion()
+        connectivityFilter.ColorRegionsOn()
+        connectivityFilter.Update()
+
+        # create 3D stenosis actor
+        mapper = vtk.vtkPolyDataMapper()
+        mapper.SetInputData(connectivityFilter.GetOutput())
+        self.stenosis_actor = vtk.vtkActor()
+        self.stenosis_actor.SetMapper(mapper)
+        self.stenosis_actor.GetProperty().SetColor(COLOR_LUMEN)
+        self.vtk_renderer.AddActor(self.stenosis_actor)
+
+        # create 2D stenosis area
+        path1 = self.lineplot.listDataItems()[0].curve.getPath()
+        path2 = pg.plot([lineROI.x_start, lineROI.x_end], [lineROI.getYPos(), lineROI.getYPos()])
+        # TODO: create shape
+
+        # calculate stenosis degree
+        self.nascet_min_val = np.min(self.rad[idx1:idx2])
+        half_stenosis_length = int((idx2 - idx1)/2)
+        if idx2 + half_stenosis_length >= self.pos.shape[0]:
+            degree_string = ""
+        else:
+            nascet_norm_val = self.rad[idx2 + half_stenosis_length]
+            degree = (1 - self.nascet_min_val / nascet_norm_val) * 100.0
+            degree_string = f'{degree:.1f}%'
+
+        # create 3D text actor
+        text_idx = idx1 + half_stenosis_length
+        cam_dir = np.array(self.vtk_renderer.GetActiveCamera().GetPosition()) - self.pos[text_idx]
+        cam_dir /= np.linalg.norm(cam_dir)
+        text_pos = self.pos[text_idx] + 2.0 * self.rad[text_idx] * cam_dir
+        self.text_actor = vtk.vtkBillboardTextActor3D()
+        self.text_actor.SetInput(degree_string)
+        self.text_actor.SetPosition(text_pos)
+        self.text_actor.GetTextProperty().SetFontSize(20)
+        self.text_actor.GetTextProperty().SetColor(0, 0, 0)
+        self.vtk_renderer.AddActor(self.text_actor)
+
+        # create 2D nascet reference marker
+        reference_idx = idx2 + half_stenosis_length
+        self.reference_marker2D = pg.InfiniteLine(pos=self.arc[reference_idx], angle=90, movable=True, pen=(0,0,0))
+        self.reference_marker2D.sigDragged.connect(self.referenceMoved)
+        self.lineplot.addItem(self.reference_marker2D)
+
+        # create 3D nascet reference marker
+        self.reference_marker3D = vtk.vtkLineSource()
+        self.reference_marker3D.SetPoint1(self.pos[reference_idx-1])
+        self.reference_marker3D.SetPoint2(self.pos[reference_idx+1])
+        tf = vtk.vtkTubeFilter()
+        tf.SetInputConnection(self.reference_marker3D.GetOutputPort())
+        tf.SetRadius(self.rad[reference_idx])
+        tf.SetNumberOfSides(25)
+        tf.CappingOn()
+        mapper = vtk.vtkPolyDataMapper()
+        mapper.SetInputConnection(tf.GetOutputPort())
+        self.reference_actor = vtk.vtkActor()
+        self.reference_actor.SetMapper(mapper)
+        self.reference_actor.GetProperty().SetColor(COLOR_LUMEN)
+        self.vtk_renderer.AddActor(self.reference_actor)
+
+    def referenceMoved(self):
+        # re-compute stenosis degree
+        idx = np.searchsorted(self.arc, self.reference_marker2D.getXPos())
+        degree = (1 - self.nascet_min_val / self.rad[idx]) * 100.0
+        degree_string = f'{degree:.1f}%'
+
+        # update scene
+        self.text_actor.SetInput(degree_string)
+        self.reference_marker3D.SetPoint1(self.pos[idx-1])
+        self.reference_marker3D.SetPoint2(self.pos[idx+1])
+        self.vtk_renderer.GetRenderWindow().Render()
 
     def cleanup(self):
-        self.vtk_renderer.RemoveActor(self.vtk_stenosis_actor)
-        self.vtk_renderer.RemoveActor(self.vtk_text_actor)
+        self.vtk_renderer.RemoveActor(self.stenosis_actor)
+        self.vtk_renderer.RemoveActor(self.text_actor)
+        self.vtk_renderer.RemoveActor(self.reference_actor)
+        self.lineplot.removeItem(self.reference_marker2D)
 
 
 class StenosisClassifierTab(QWidget):
@@ -436,70 +539,16 @@ class StenosisClassifierTab(QWidget):
                 idx2 == end_index - 1):
                 continue
 
-            # compute normals
-            n1 = np.mean(pos[idx1:idx1+6], axis=0) - np.mean(pos[idx1-5:idx1+1], axis=0)
-            n2 = np.mean(pos[idx2-5:idx2+1], axis=0) - np.mean(pos[idx2:idx2+6], axis=0)
-
-            # cut lower end
-            plane = vtk.vtkPlane()
-            plane.SetOrigin(pos[idx1])
-            plane.SetNormal(n1)
-            clipper = vtk.vtkClipPolyData()
-            clipper.SetInputDataObject(self.reader_lumen.GetOutput())
-            clipper.SetClipFunction(plane)
-            clipper.SetInsideOut(False)
-            clipper.Update()
-            clipped = clipper.GetOutput()
-
-            # cut upper end
-            plane = vtk.vtkPlane()
-            plane.SetOrigin(pos[idx2])
-            plane.SetNormal(n2)
-            clipper = vtk.vtkClipPolyData()
-            clipper.SetInputDataObject(clipped)
-            clipper.SetClipFunction(plane)
-            clipper.SetInsideOut(False)
-            clipper.Update()
-
-            # remove unwanted branches
-            connectivityFilter = vtk.vtkConnectivityFilter()
-            connectivityFilter.SetInputConnection(clipper.GetOutputPort())
-            connectivityFilter.SetClosestPoint(pos[idx1])
-            connectivityFilter.SetExtractionModeToClosestPointRegion()
-            connectivityFilter.ColorRegionsOn()
-            connectivityFilter.Update()
-
-            # create 3D stenosis actor
-            mapper = vtk.vtkPolyDataMapper()
-            mapper.SetInputData(connectivityFilter.GetOutput())
-            stenosis_actor = vtk.vtkActor()
-            stenosis_actor.SetMapper(mapper)
-            stenosis_actor.GetProperty().SetColor(COLOR_LUMEN)
-            stenosis_actor.GetProperty().SetOpacity(1.0)
-
-            # calculate stenosis degree
-            half_stenosis_length = int((idx2 - idx1)/2)
-            if idx2 + half_stenosis_length >= pos.shape[0]:
-                degree_string = ""
-            else:
-                nascet_min_val = np.min(rad[idx1:idx2])
-                nascet_norm_val = rad[idx2 + half_stenosis_length]
-                degree = (1 - nascet_min_val / nascet_norm_val) * 100.0
-                degree_string = f'{degree:.1f}%'
-
-            # create 3D text actor
-            text_idx = idx1 + half_stenosis_length
-            cam_dir = np.array(self.renderer.GetActiveCamera().GetPosition()) - pos[text_idx]
-            cam_dir /= np.linalg.norm(cam_dir)
-            text_pos = pos[text_idx] + 2.0 * rad[text_idx] * cam_dir
-            text_actor = vtk.vtkBillboardTextActor3D()
-            text_actor.SetInput(degree_string)
-            text_actor.SetPosition(text_pos)
-            text_actor.GetTextProperty().SetFontSize(20)
-            text_actor.GetTextProperty().SetColor(0, 0, 0)
-            
-            # create stenosis wrapper object
-            stenosis = StenosisWrapper(self.renderer, None, start_index, stenosis_actor, text_actor) 
+            stenosis = StenosisWrapper(self.renderer, 
+                                       self.lineplots[lineROI.plot_id],
+                                       lineROI,
+                                       self.reader_lumen.GetOutput(),
+                                       pos,
+                                       rad,
+                                       arc,
+                                       start_index,
+                                       idx1,
+                                       idx2) 
             stenosis_list.append(stenosis)
 
         self.model_view.GetRenderWindow().Render()
