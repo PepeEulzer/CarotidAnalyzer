@@ -426,7 +426,6 @@ class SegmentationModuleTab(QWidget):
             return
 
         s = self.brush_size
-        s_z = self.brush_z 
         x0 = max(x-s, 0)
         x1 = min(x+s+1, self.label_map_data.shape[0])
         y0 = max(y-s, 0)
@@ -438,6 +437,7 @@ class SegmentationModuleTab(QWidget):
             
         else: 
             # draw sphere
+            s_z = self.brush_z
             z0 = max(z-s_z, 0)
             z1 = min(z+s_z+1, self.label_map_data.shape[2])
             mask = self.circle_mask[x0-x+s:x1-x+s, y0-y+s:y1-y+s, z0-z+s_z:z1-z+s_z] # crop sphere mask at borders
