@@ -4,9 +4,9 @@ import numpy as np
 import vtk
 from vtk.util.numpy_support import vtk_to_numpy
 from vtk.qt.QVTKRenderWindowInteractor import QVTKRenderWindowInteractor
-from PyQt5.QtWidgets import QWidget, QHBoxLayout, QTabWidget
-from PyQt5.QtGui import QColor
-from PyQt5.QtCore import Qt, QRectF, QLineF
+from PyQt5.QtWidgets import QWidget, QHBoxLayout, QTabWidget, QGraphicsPathItem
+from PyQt5.QtGui import QColor, QPainterPath
+from PyQt5.QtCore import Qt, QRectF, QLineF, QPoint
 import pyqtgraph as pg
 
 from defaults import *
@@ -134,9 +134,18 @@ class StenosisWrapper(object):
         self.vtk_renderer.AddActor(self.stenosis_actor)
 
         # create 2D stenosis area
-        path1 = self.lineplot.listDataItems()[0].curve.getPath()
-        path2 = pg.plot([lineROI.x_start, lineROI.x_end], [lineROI.getYPos(), lineROI.getYPos()])
-        # TODO: create shape
+        area_x = self.arc[idx1:idx2]
+        area_y = self.rad[idx1:idx2]
+        path = QPainterPath()
+        path.moveTo(area_x[0], lineROI.getYPos())
+        for i in range(idx2-idx1):
+            path.lineTo(area_x[i], area_y[i])
+        path.lineTo(area_x[-1], lineROI.getYPos())
+        
+        self.stenosis_area = QGraphicsPathItem(path)
+        self.stenosis_area.setPen(pg.mkPen(None))
+        self.stenosis_area.setBrush(pg.mkBrush(255,0,0))
+        self.lineplot.addItem(self.stenosis_area)
 
         # calculate stenosis degree
         self.nascet_min_val = np.min(self.rad[idx1:idx2])
@@ -161,8 +170,12 @@ class StenosisWrapper(object):
         self.vtk_renderer.AddActor(self.text_actor)
 
         # create 2D nascet reference marker
-        reference_idx = idx2 + half_stenosis_length
-        self.reference_marker2D = pg.InfiniteLine(pos=self.arc[reference_idx], angle=90, movable=True, pen=(0,0,0))
+        reference_idx = min(idx2 + half_stenosis_length, self.pos.shape[0]-2)
+        self.reference_marker2D = pg.InfiniteLine(pos=self.arc[reference_idx], 
+                                                  angle=90,
+                                                  movable=True,
+                                                  bounds=[self.arc[1], self.arc[-2]],
+                                                  pen=(0,0,0))
         self.reference_marker2D.sigDragged.connect(self.referenceMoved)
         self.lineplot.addItem(self.reference_marker2D)
 
@@ -170,13 +183,13 @@ class StenosisWrapper(object):
         self.reference_marker3D = vtk.vtkLineSource()
         self.reference_marker3D.SetPoint1(self.pos[reference_idx-1])
         self.reference_marker3D.SetPoint2(self.pos[reference_idx+1])
-        tf = vtk.vtkTubeFilter()
-        tf.SetInputConnection(self.reference_marker3D.GetOutputPort())
-        tf.SetRadius(self.rad[reference_idx])
-        tf.SetNumberOfSides(25)
-        tf.CappingOn()
+        self.tube_filter = vtk.vtkTubeFilter()
+        self.tube_filter.SetInputConnection(self.reference_marker3D.GetOutputPort())
+        self.tube_filter.SetRadius(self.rad[reference_idx])
+        self.tube_filter.SetNumberOfSides(25)
+        self.tube_filter.CappingOn()
         mapper = vtk.vtkPolyDataMapper()
-        mapper.SetInputConnection(tf.GetOutputPort())
+        mapper.SetInputConnection(self.tube_filter.GetOutputPort())
         self.reference_actor = vtk.vtkActor()
         self.reference_actor.SetMapper(mapper)
         self.reference_actor.GetProperty().SetColor(COLOR_LUMEN)
@@ -192,6 +205,7 @@ class StenosisWrapper(object):
         self.text_actor.SetInput(degree_string)
         self.reference_marker3D.SetPoint1(self.pos[idx-1])
         self.reference_marker3D.SetPoint2(self.pos[idx+1])
+        self.tube_filter.SetRadius(self.rad[idx])
         self.vtk_renderer.GetRenderWindow().Render()
 
     def cleanup(self):
@@ -199,6 +213,8 @@ class StenosisWrapper(object):
         self.vtk_renderer.RemoveActor(self.text_actor)
         self.vtk_renderer.RemoveActor(self.reference_actor)
         self.lineplot.removeItem(self.reference_marker2D)
+        self.lineplot.removeItem(self.stenosis_area)
+
 
 
 class StenosisClassifierTab(QWidget):
