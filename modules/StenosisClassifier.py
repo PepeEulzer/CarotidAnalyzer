@@ -6,7 +6,7 @@ from vtk.util.numpy_support import vtk_to_numpy
 from vtk.qt.QVTKRenderWindowInteractor import QVTKRenderWindowInteractor
 from PyQt5.QtWidgets import QWidget, QHBoxLayout, QTabWidget, QGraphicsPathItem
 from PyQt5.QtGui import QColor, QPainterPath
-from PyQt5.QtCore import Qt, QRectF, QLineF, QPoint
+from PyQt5.QtCore import Qt, QRectF, QLineF, pyqtSignal
 import pyqtgraph as pg
 
 from defaults import *
@@ -79,6 +79,31 @@ class LineROI(pg.InfiniteLine):
                 self.sigPositionChangeFinished.emit(self)
 
 
+
+class StenosisAreaItem(QGraphicsPathItem):
+    """
+    Displays the area of a stenosis in a graph.
+    """
+    def __init__(self, activate_method, inactivate_method, *args):
+        super().__init__(*args)
+        self.activate_method = activate_method
+        self.inactivate_method = inactivate_method
+        self.brush_inactive = pg.mkBrush(200,0,0)
+        self.brush_hover = pg.mkBrush(250,0,0)
+        self.setPen(pg.mkPen(None))
+        self.setBrush(self.brush_inactive)
+        self.setAcceptHoverEvents(True)
+
+    def hoverEnterEvent(self, ev):
+        self.setBrush(self.brush_hover)
+        self.activate_method()
+
+    def hoverLeaveEvent(self, ev):
+        self.setBrush(self.brush_inactive)
+        self.inactivate_method()
+
+
+
 class StenosisWrapper(object):
     """
     Keeps track of all actors/graph objects needed to display one stenosis.
@@ -122,7 +147,7 @@ class StenosisWrapper(object):
         connectivityFilter.SetInputConnection(clipper.GetOutputPort())
         connectivityFilter.SetClosestPoint(self.pos[idx1])
         connectivityFilter.SetExtractionModeToClosestPointRegion()
-        connectivityFilter.ColorRegionsOn()
+        connectivityFilter.ColorRegionsOff()
         connectivityFilter.Update()
 
         # create 3D stenosis actor
@@ -138,41 +163,38 @@ class StenosisWrapper(object):
         area_y = self.rad[idx1:idx2]
         h = lineROI.getYPos()
         path = QPainterPath()
-
         x1 = self.__getLineIntersection(self.arc[idx1-1], self.arc[idx1], self.rad[idx1-1], self.rad[idx1], h)
         path.moveTo(x1, h)
         for i in range(area_x.shape[0]):
             path.lineTo(area_x[i], area_y[i])
         x2 = self.__getLineIntersection(self.arc[idx2-1], self.arc[idx2], self.rad[idx2-1], self.rad[idx2], h)
         path.lineTo(x2, h)
-
-        self.stenosis_area = QGraphicsPathItem(path)
-        self.stenosis_area.setPen(pg.mkPen(None))
-        self.stenosis_area.setBrush(pg.mkBrush(255,0,0))
+        self.stenosis_area = StenosisAreaItem(self.stenosisAreaHoverEnter, self.stenosisAreaHoverLeave, path)
         self.lineplot.addItem(self.stenosis_area)
 
-        # calculate stenosis degree
+        # calculate stenosis degree and information
         self.nascet_min_val = np.min(self.rad[idx1:idx2])
         half_stenosis_length = int((idx2 - idx1)/2)
+        self.stenosis_arc_len = self.arc[idx2] - self.arc[idx1]
         reference_idx = min(idx2 + half_stenosis_length, self.pos.shape[0]-2)
-        degree = (1 - self.nascet_min_val / self.rad[reference_idx]) * 100.0
-        degree_string = f'{degree:.1f}%'
+        self.__computeStenosisDegree(reference_idx)
 
         # create 2D text actor
-        text_idx = idx1 + half_stenosis_length
-        self.text_item = pg.TextItem(degree_string, color=(0, 0, 0), anchor=(0.5, 0))
-        self.text_item.setPos(self.arc[text_idx], self.nascet_min_val)
-        self.lineplot.addItem(self.text_item)
+        self.text_idx = idx1 + half_stenosis_length
+        self.text_item = pg.TextItem(self.degree_string, color=(0, 0, 0), anchor=(0.5, 0))
+        self.text_item.setPos(self.arc[self.text_idx], self.nascet_min_val)
+        self.text_item_full = pg.TextItem(self.full_description, color=(0, 0, 0), anchor=(0.5, 0))
+        self.text_item_full.setPos(self.arc[self.text_idx], self.nascet_min_val)
+        self.text_item_full.fill = pg.mkBrush(255, 255, 240)
+        self.lineplot.addItem(self.text_item) # draw above lines
 
         # create 3D text actor
-        cam_dir = np.array(self.vtk_renderer.GetActiveCamera().GetPosition()) - self.pos[text_idx]
-        cam_dir /= np.linalg.norm(cam_dir)
-        text_pos = self.pos[text_idx] + 2.0 * self.rad[text_idx] * cam_dir
         self.text_actor = vtk.vtkBillboardTextActor3D()
-        self.text_actor.SetInput(degree_string)
-        self.text_actor.SetPosition(text_pos)
+        self.text_actor.SetInput(self.degree_string)
         self.text_actor.GetTextProperty().SetFontSize(20)
         self.text_actor.GetTextProperty().SetColor(0, 0, 0)
+        self.text_actor.GetTextProperty().SetBackgroundColor(1, 1, 240/255)
+        self.update3DTextPos()
         self.vtk_renderer.AddActor(self.text_actor)
 
         # create 2D nascet reference marker
@@ -200,6 +222,7 @@ class StenosisWrapper(object):
         self.reference_actor.GetProperty().SetColor(COLOR_LUMEN)
         self.vtk_renderer.AddActor(self.reference_actor)
 
+
     def __getLineIntersection(self, x1, x2, y1, y2, h):
         """
         Computes the x-value of the intersection of a line
@@ -211,19 +234,56 @@ class StenosisWrapper(object):
         b = y2 - m * x2
         return (h - b) / m
 
+        
+    def __computeStenosisDegree(self, ref_idx):
+        degree = (1 - self.nascet_min_val / self.rad[ref_idx]) * 100.0
+        self.degree_string = f'{degree:.1f}%'
+        self.full_description =  f'Stenosis degree (NASCET): {self.degree_string}\n'\
+                                 f'Smallest inner radius: {self.nascet_min_val:.1f} mm\n'\
+                                 f'Stenosis length: {self.stenosis_arc_len:.1f} mm'
+
+
+    def update3DTextPos(self):
+        cam_dir = np.array(self.vtk_renderer.GetActiveCamera().GetPosition()) - self.pos[self.text_idx]
+        cam_dir /= np.linalg.norm(cam_dir)
+        text_pos = self.pos[self.text_idx] + 2.0 * self.rad[self.text_idx] * cam_dir
+        self.text_actor.SetPosition(text_pos)
+
     def referenceMoved(self):
-        # re-compute stenosis degree
+        # re-compute stenosis degree, update description
         idx = np.searchsorted(self.arc, self.reference_marker2D.getXPos())
-        degree = (1 - self.nascet_min_val / self.rad[idx]) * 100.0
-        degree_string = f'{degree:.1f}%'
+        self.__computeStenosisDegree(idx)
 
         # update scene
-        self.text_actor.SetInput(degree_string)
-        self.text_item.setPlainText(degree_string)
+        self.text_actor.SetInput(self.degree_string)
+        self.text_item.setPlainText(self.degree_string)
+        self.text_item_full.setPlainText(self.full_description)
         self.reference_marker3D.SetPoint1(self.pos[idx-1])
         self.reference_marker3D.SetPoint2(self.pos[idx+1])
         self.tube_filter.SetRadius(self.rad[idx])
         self.vtk_renderer.GetRenderWindow().Render()
+
+
+    def stenosisAreaHoverEnter(self):
+        self.text_actor.SetInput(self.full_description)
+        self.text_actor.SetDisplayOffset(-120, -25)
+        self.text_actor.GetTextProperty().SetBackgroundOpacity(1)
+        self.lineplot.addItem(self.text_item_full)
+        self.stenosis_actor.GetProperty().SetColor(1,0,0)
+        self.reference_actor.GetProperty().SetColor(1,0,0)
+        self.update3DTextPos() # TODO call when camera is moving?
+        self.vtk_renderer.GetRenderWindow().Render()
+
+    
+    def stenosisAreaHoverLeave(self):
+        self.text_actor.SetInput(self.degree_string)
+        self.text_actor.SetDisplayOffset(0, 0)
+        self.text_actor.GetTextProperty().SetBackgroundOpacity(0)
+        self.lineplot.removeItem(self.text_item_full)
+        self.stenosis_actor.GetProperty().SetColor(COLOR_LUMEN)
+        self.reference_actor.GetProperty().SetColor(COLOR_LUMEN)
+        self.vtk_renderer.GetRenderWindow().Render()
+
 
     def cleanup(self):
         self.vtk_renderer.RemoveActor(self.stenosis_actor)
@@ -231,6 +291,7 @@ class StenosisWrapper(object):
         self.vtk_renderer.RemoveActor(self.reference_actor)
         self.lineplot.removeItem(self.stenosis_area)
         self.lineplot.removeItem(self.text_item)
+        self.lineplot.removeItem(self.text_item_full)
         self.lineplot.removeItem(self.reference_marker2D)
 
 
