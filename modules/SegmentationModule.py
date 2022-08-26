@@ -8,7 +8,7 @@ from vtk.util.numpy_support import vtk_to_numpy, numpy_to_vtk
 from PyQt5.QtCore import Qt, pyqtSignal
 from PyQt5.QtWidgets import  (
     QWidget, QVBoxLayout, QHBoxLayout, QSlider, QTabWidget,
-    QPushButton, QMessageBox, QGridLayout, QLabel
+    QPushButton, QMessageBox, QGridLayout, QLabel, QCheckBox
 )
 
 from modules.Interactors import ImageSliceInteractor, IsosurfaceInteractor
@@ -30,8 +30,8 @@ class SegmentationModuleTab(QWidget):
         self.pred_file = False      # path to CNN segmentation prediction file
         self.editing_active = False # whether label map editing is active
         self.brush_size = 0         # size of brush on label map
-        self.draw3D = False         # set dimension of brush  # ?: default=0 to force user to select dimension; work with true/false? (2 variables or 1 variable w/ true:=2d, false:=3D)
-        
+        self.draw3D = False         # dimension of brush (2/3D) # ?: default=0 to force user to select dimension; work with true/false? (2 variables or 1 variable w/ true:=2d, false:=3D)
+
         # on-screen objects
         self.CNN_button = QPushButton("New Segmentation: Initialize with CNN")
         self.edit_button = QPushButton("Edit Segmentation")  
@@ -39,6 +39,8 @@ class SegmentationModuleTab(QWidget):
         self.brush_button = QPushButton("Brush") 
         self.brush_2D = QPushButton("2D")  # show which mode selected 
         self.brush_3D = QPushButton("3D")
+        self.auto_update_box = QCheckBox("auto-update")
+        self.manual_update_button = QPushButton("update")
         self.stop_editing_button = QPushButton("Stop Editing")
         self.lumen_button = QPushButton("Lumen")
         self.plaque_button = QPushButton("Plaque")
@@ -54,6 +56,10 @@ class SegmentationModuleTab(QWidget):
         self.brush_button.setVisible(False)
         self.brush_2D.setVisible(False) 
         self.brush_3D.setVisible(False)
+        self.auto_update_box.setVisible(False)
+        self.auto_update_box.setChecked(True)
+        self.manual_update_button.setVisible(False)
+        self.manual_update_button.setEnabled(False)  #  set False when connected to checkbox 
         self.eraser_button.setVisible(False)
         self.stop_editing_button.setVisible(False)
         self.lumen_button.setVisible(False)
@@ -78,14 +84,29 @@ class SegmentationModuleTab(QWidget):
         self.edit_buttons_layout.addWidget(self.brush_button, 0,0,1,2) 
         self.edit_buttons_layout.addWidget(self.brush_2D, 0,0)
         self.edit_buttons_layout.addWidget(self.brush_3D, 0,1)
-        self.edit_buttons_layout.addWidget(self.lumen_button, 1,0)
-        self.edit_buttons_layout.addWidget(self.plaque_button, 1,1)
-        self.edit_buttons_layout.addWidget(self.eraser_button, 2,0,1,2)
-        self.edit_buttons_layout.addWidget(self.brush_slider_label, 3,0,1,2)
-        self.edit_buttons_layout.addWidget(self.brush_size_slider, 4,0,1,2)
-        self.edit_buttons_layout.addWidget(self.stop_editing_button, 5,0,1,2)
-        self.edit_buttons_layout.setRowStretch(7,1)  
+        self.edit_buttons_layout.addWidget(self.auto_update_box, 1,0)
+        self.edit_buttons_layout.addWidget(self.manual_update_button, 1,1)
+        self.edit_buttons_layout.addWidget(self.lumen_button, 2,0)
+        self.edit_buttons_layout.addWidget(self.plaque_button, 2,1)
+        self.edit_buttons_layout.addWidget(self.eraser_button, 3,0,1,2)
+        self.edit_buttons_layout.addWidget(self.brush_slider_label, 4,0,1,2)
+        self.edit_buttons_layout.addWidget(self.brush_size_slider, 5,0,1,2)
+        self.edit_buttons_layout.addWidget(self.stop_editing_button, 6,0,1,2)
+        self.edit_buttons_layout.setRowStretch(8,1)  
 
+        """self.brush_buttons_layout = QGridLayout()
+        self.brush_buttons_layout.setVerticalSpacing(30)  
+        self.brush_buttons_layout.addWidget(self.brush_2D, 0,0)
+        self.brush_buttons_layout.addWidget(self.brush_3D, 0,1)
+        self.brush_buttons_layout.addWidget(self.auto_update_box, 1,0)
+        self.brush_buttons_layout.addWidget(self.manual_update_button, 1,1)
+        self.brush_buttons_layout.addWidget(self.lumen_button, 2,0)
+        self.brush_buttons_layout.addWidget(self.plaque_button, 2,1)
+        self.brush_buttons_layout.addWidget(self.eraser_button, 3,0,1,2)
+        self.brush_buttons_layout.addWidget(self.brush_slider_label, 4,0,1,2)
+        self.brush_buttons_layout.addWidget(self.brush_size_slider, 5,0,1,2)
+        self.edit_buttons_layout.setRowStretch(6,1)  """
+        
         self.top_layout = QHBoxLayout(self)
         self.top_layout.addLayout(self.slice_view_layout)
         self.top_layout.addLayout(self.edit_buttons_layout)
@@ -109,6 +130,10 @@ class SegmentationModuleTab(QWidget):
         self.brush_button.pressed.connect(self.drawMode)  
         self.brush_2D.pressed.connect(self.set2DBrush)
         self.brush_3D.pressed.connect(self.set3DBrush)
+        # how to connect checking action with updating? -> doc: connect with signal 
+        # self.auto_update_box.isChecked()
+        self.auto_update_box.stateChanged.connect(self.checkUpdateMode)
+        self.manual_update_button.pressed.connect(self.update_3Ddisplay)
         self.brush_size_slider.valueChanged[int].connect(self.brushSizeChanged)
         self.stop_editing_button.pressed.connect(self.deactivateEditing)
         self.eraser_button.pressed.connect(self.setColorErase)
@@ -290,6 +315,8 @@ class SegmentationModuleTab(QWidget):
         self.brush_button.setVisible(False)
         self.brush_2D.setVisible(False)
         self.brush_3D.setVisible(False)
+        self.auto_update_box.setVisible(False)
+        self.manual_update_button.setVisible(False)
         self.stop_editing_button.setVisible(False)
         self.lumen_button.setVisible(False)
         #self.lumen_button.setStyleSheet("background-color: light gray")
@@ -352,6 +379,12 @@ class SegmentationModuleTab(QWidget):
         self.brush_3D.setStyleSheet("background-color: rgb(175,175,175)")
         self.brush_2D.setStyleSheet("background-color: light gray")
 
+    def checkUpdateMode(self):  #  geht das vielleicht auch eleganter vielleicht mit clicked(!)/pressed/checkstate?
+        if self.auto_update_box.isChecked():
+            self.manual_update_button.setEnabled(False)
+        else: 
+            self.manual_update_button.setEnabled(True)
+
     def setColorLumen(self):
         self.draw_value = 2
         self.lumen_button.setStyleSheet("background-color:rgb(216,101,79)")
@@ -381,6 +414,8 @@ class SegmentationModuleTab(QWidget):
         self.brush_button.setVisible(False)
         self.brush_2D.setVisible(True)
         self.brush_3D.setVisible(True)
+        self.auto_update_box.setVisible(True)
+        self.manual_update_button.setVisible(True)
         self.lumen_button.setVisible(True) 
         self.plaque_button.setVisible(True)
         self.eraser_button.setVisible(True)
@@ -434,7 +469,10 @@ class SegmentationModuleTab(QWidget):
             # draw circle  
             mask = self.circle_mask[x0-x+s:x1-x+s, y0-y+s:y1-y+s] # crop circle mask at borders
             self.label_map_data[x0:x1,y0:y1,z][mask] = self.draw_value
-            
+        #!!! FEHLER: index 2 is out of bounds for axis 1 with size 0  --> ist das bei Pepes Branch auch so??
+        # ist dimension des Bildes anders als die der LM?
+            print(self.image.GetExtent(), self.label_map.GetExtent())  # output: (0, 119, 0, 149, 0, 259) (0, 119, 0, 143, 0, 247) -> label map hat weniger slices als extent (ist das nur bei mir/diesen Daten so oder generell? - zumindest in den Daten, die ich hab)
+            # -> catch: label map und image nicht die gleiche Größe -> label map array anpassen??
         else: 
             # draw sphere
             s_z = self.brush_z
@@ -450,13 +488,15 @@ class SegmentationModuleTab(QWidget):
         
         
 
-
     def end_draw(self, obj, event):
         id = vtk.vtkCommand.MouseMoveEvent
         self.slice_view.interactor_style.RemoveObservers(id)  
         self.slice_view.interactor_style.AddObserver("MouseMoveEvent", self.pickPosition)
 
-        # update 3D display
+        if self.auto_update_box.isChecked():
+            self.update_3Ddisplay()
+        
+    def update_3Ddisplay(self):
         self.model_view.padding.SetInputData(self.label_map)
         self.model_view.GetRenderWindow().Render()
 
