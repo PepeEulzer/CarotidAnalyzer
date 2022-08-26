@@ -4,10 +4,12 @@ import numpy as np
 import vtk
 from vtk.util.numpy_support import vtk_to_numpy
 from vtk.qt.QVTKRenderWindowInteractor import QVTKRenderWindowInteractor
-from PyQt5.QtWidgets import QWidget, QHBoxLayout, QTabWidget
-from PyQt5.QtGui import QColor
-from PyQt5.QtCore import Qt, QRectF, QLineF
+from PyQt5.QtWidgets import QWidget, QHBoxLayout, QTabWidget, QGraphicsPathItem
+from PyQt5.QtGui import QColor, QPainterPath
+from PyQt5.QtCore import Qt, QRectF, QLineF, pyqtSignal
 import pyqtgraph as pg
+
+from vmtk import vmtkscripts
 
 from defaults import *
 
@@ -79,6 +81,31 @@ class LineROI(pg.InfiniteLine):
                 self.sigPositionChangeFinished.emit(self)
 
 
+
+class StenosisAreaItem(QGraphicsPathItem):
+    """
+    Displays the area of a stenosis in a graph.
+    """
+    def __init__(self, activate_method, inactivate_method, *args):
+        super().__init__(*args)
+        self.activate_method = activate_method
+        self.inactivate_method = inactivate_method
+        self.brush_inactive = pg.mkBrush(200,0,0)
+        self.brush_hover = pg.mkBrush(250,0,0)
+        self.setPen(pg.mkPen(None))
+        self.setBrush(self.brush_inactive)
+        self.setAcceptHoverEvents(True)
+
+    def hoverEnterEvent(self, ev):
+        self.setBrush(self.brush_hover)
+        self.activate_method()
+
+    def hoverLeaveEvent(self, ev):
+        self.setBrush(self.brush_inactive)
+        self.inactivate_method()
+
+
+
 class StenosisWrapper(object):
     """
     Keeps track of all actors/graph objects needed to display one stenosis.
@@ -122,7 +149,7 @@ class StenosisWrapper(object):
         connectivityFilter.SetInputConnection(clipper.GetOutputPort())
         connectivityFilter.SetClosestPoint(self.pos[idx1])
         connectivityFilter.SetExtractionModeToClosestPointRegion()
-        connectivityFilter.ColorRegionsOn()
+        connectivityFilter.ColorRegionsOff()
         connectivityFilter.Update()
 
         # create 3D stenosis actor
@@ -134,35 +161,51 @@ class StenosisWrapper(object):
         self.vtk_renderer.AddActor(self.stenosis_actor)
 
         # create 2D stenosis area
-        path1 = self.lineplot.listDataItems()[0].curve.getPath()
-        path2 = pg.plot([lineROI.x_start, lineROI.x_end], [lineROI.getYPos(), lineROI.getYPos()])
-        # TODO: create shape
+        area_x = self.arc[idx1:idx2]
+        area_y = self.rad[idx1:idx2]
+        h = lineROI.getYPos()
+        path = QPainterPath()
+        x1 = self.__getLineIntersection(self.arc[idx1-1], self.arc[idx1], self.rad[idx1-1], self.rad[idx1], h)
+        path.moveTo(x1, h)
+        for i in range(area_x.shape[0]):
+            path.lineTo(area_x[i], area_y[i])
+        x2 = self.__getLineIntersection(self.arc[idx2-1], self.arc[idx2], self.rad[idx2-1], self.rad[idx2], h)
+        path.lineTo(x2, h)
+        self.stenosis_area = StenosisAreaItem(self.stenosisAreaHoverEnter, self.stenosisAreaHoverLeave, path)
+        self.lineplot.addItem(self.stenosis_area)
 
-        # calculate stenosis degree
+        # calculate stenosis degree and information
         self.nascet_min_val = np.min(self.rad[idx1:idx2])
         half_stenosis_length = int((idx2 - idx1)/2)
-        if idx2 + half_stenosis_length >= self.pos.shape[0]:
-            degree_string = ""
-        else:
-            nascet_norm_val = self.rad[idx2 + half_stenosis_length]
-            degree = (1 - self.nascet_min_val / nascet_norm_val) * 100.0
-            degree_string = f'{degree:.1f}%'
+        self.stenosis_arc_len = self.arc[idx2] - self.arc[idx1]
+        reference_idx = min(idx2 + half_stenosis_length, self.pos.shape[0]-2)
+        self.__computeStenosisDegree(reference_idx)
+
+        # create 2D text actor
+        self.text_idx = idx1 + half_stenosis_length
+        self.text_item = pg.TextItem(self.degree_string, color=(0, 0, 0), anchor=(0.5, 0))
+        self.text_item.setPos(self.arc[self.text_idx], self.nascet_min_val)
+        self.text_item_full = pg.TextItem(self.full_description, color=(0, 0, 0), anchor=(0.5, 0))
+        self.text_item_full.setPos(self.arc[self.text_idx], self.nascet_min_val)
+        self.text_item_full.fill = pg.mkBrush(255, 255, 240)
+        self.lineplot.addItem(self.text_item) # draw above lines
 
         # create 3D text actor
-        text_idx = idx1 + half_stenosis_length
-        cam_dir = np.array(self.vtk_renderer.GetActiveCamera().GetPosition()) - self.pos[text_idx]
-        cam_dir /= np.linalg.norm(cam_dir)
-        text_pos = self.pos[text_idx] + 2.0 * self.rad[text_idx] * cam_dir
         self.text_actor = vtk.vtkBillboardTextActor3D()
-        self.text_actor.SetInput(degree_string)
-        self.text_actor.SetPosition(text_pos)
+        self.text_actor.SetInput(self.degree_string)
+        self.text_actor.SetDisplayOffset(-20, -5)
         self.text_actor.GetTextProperty().SetFontSize(20)
         self.text_actor.GetTextProperty().SetColor(0, 0, 0)
+        self.text_actor.GetTextProperty().SetBackgroundColor(1, 1, 240/255)
+        self.update3DTextPos()
         self.vtk_renderer.AddActor(self.text_actor)
 
         # create 2D nascet reference marker
-        reference_idx = idx2 + half_stenosis_length
-        self.reference_marker2D = pg.InfiniteLine(pos=self.arc[reference_idx], angle=90, movable=True, pen=(0,0,0))
+        self.reference_marker2D = pg.InfiniteLine(pos=self.arc[reference_idx], 
+                                                  angle=90,
+                                                  movable=True,
+                                                  bounds=[self.arc[1], self.arc[-2]],
+                                                  pen=(0,0,0))
         self.reference_marker2D.sigDragged.connect(self.referenceMoved)
         self.lineplot.addItem(self.reference_marker2D)
 
@@ -170,35 +213,90 @@ class StenosisWrapper(object):
         self.reference_marker3D = vtk.vtkLineSource()
         self.reference_marker3D.SetPoint1(self.pos[reference_idx-1])
         self.reference_marker3D.SetPoint2(self.pos[reference_idx+1])
-        tf = vtk.vtkTubeFilter()
-        tf.SetInputConnection(self.reference_marker3D.GetOutputPort())
-        tf.SetRadius(self.rad[reference_idx])
-        tf.SetNumberOfSides(25)
-        tf.CappingOn()
+        self.tube_filter = vtk.vtkTubeFilter()
+        self.tube_filter.SetInputConnection(self.reference_marker3D.GetOutputPort())
+        self.tube_filter.SetRadius(1.5*self.rad[reference_idx])
+        self.tube_filter.SetNumberOfSides(25)
+        self.tube_filter.CappingOn()
         mapper = vtk.vtkPolyDataMapper()
-        mapper.SetInputConnection(tf.GetOutputPort())
+        mapper.SetInputConnection(self.tube_filter.GetOutputPort())
         self.reference_actor = vtk.vtkActor()
         self.reference_actor.SetMapper(mapper)
         self.reference_actor.GetProperty().SetColor(COLOR_LUMEN)
         self.vtk_renderer.AddActor(self.reference_actor)
 
+
+    def __getLineIntersection(self, x1, x2, y1, y2, h):
+        """
+        Computes the x-value of the intersection of a line
+        through the points (x1, y1), (x2, y2) with the horizontal
+        line at y=h.
+        Used to display the correct 2D stenosis area.
+        """
+        m = (y2 - y1) / (x2 - x1)
+        b = y2 - m * x2
+        return (h - b) / m
+
+        
+    def __computeStenosisDegree(self, ref_idx):
+        degree = (1 - self.nascet_min_val / self.rad[ref_idx]) * 100.0
+        self.degree_string = f'{degree:.1f}%'
+        self.full_description =  f'Stenosis degree (NASCET): {self.degree_string}\n'\
+                                 f'Smallest inner radius: {self.nascet_min_val:.1f} mm\n'\
+                                 f'Stenosis length: {self.stenosis_arc_len:.1f} mm'
+
+
+    def update3DTextPos(self):
+        cam_pos = np.array(self.vtk_renderer.GetActiveCamera().GetPosition())
+        view_dir = self.pos[self.text_idx] - cam_pos
+        text_pos = cam_pos + 0.7 * view_dir
+        self.text_actor.SetPosition(text_pos)
+
     def referenceMoved(self):
-        # re-compute stenosis degree
+        # re-compute stenosis degree, update description
         idx = np.searchsorted(self.arc, self.reference_marker2D.getXPos())
-        degree = (1 - self.nascet_min_val / self.rad[idx]) * 100.0
-        degree_string = f'{degree:.1f}%'
+        self.__computeStenosisDegree(idx)
 
         # update scene
-        self.text_actor.SetInput(degree_string)
+        self.text_actor.SetInput(self.degree_string)
+        self.text_item.setPlainText(self.degree_string)
+        self.text_item_full.setPlainText(self.full_description)
         self.reference_marker3D.SetPoint1(self.pos[idx-1])
         self.reference_marker3D.SetPoint2(self.pos[idx+1])
+        self.tube_filter.SetRadius(1.5*self.rad[idx])
         self.vtk_renderer.GetRenderWindow().Render()
+
+
+    def stenosisAreaHoverEnter(self):
+        self.text_actor.SetInput(self.full_description)
+        self.text_actor.SetDisplayOffset(-120, -25)
+        self.text_actor.GetTextProperty().SetBackgroundOpacity(1)
+        self.lineplot.addItem(self.text_item_full)
+        self.stenosis_actor.GetProperty().SetColor(1,0,0)
+        self.reference_actor.GetProperty().SetColor(1,0,0)
+        self.update3DTextPos()
+        self.vtk_renderer.GetRenderWindow().Render()
+
+    
+    def stenosisAreaHoverLeave(self):
+        self.text_actor.SetInput(self.degree_string)
+        self.text_actor.SetDisplayOffset(-20, -5)
+        self.text_actor.GetTextProperty().SetBackgroundOpacity(0)
+        self.lineplot.removeItem(self.text_item_full)
+        self.stenosis_actor.GetProperty().SetColor(COLOR_LUMEN)
+        self.reference_actor.GetProperty().SetColor(COLOR_LUMEN)
+        self.vtk_renderer.GetRenderWindow().Render()
+
 
     def cleanup(self):
         self.vtk_renderer.RemoveActor(self.stenosis_actor)
         self.vtk_renderer.RemoveActor(self.text_actor)
         self.vtk_renderer.RemoveActor(self.reference_actor)
+        self.lineplot.removeItem(self.stenosis_area)
+        self.lineplot.removeItem(self.text_item)
+        self.lineplot.removeItem(self.text_item_full)
         self.lineplot.removeItem(self.reference_marker2D)
+
 
 
 class StenosisClassifierTab(QWidget):
@@ -208,31 +306,32 @@ class StenosisClassifierTab(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.min_branch_len = 20 # minimal length of a branch in mm
-        self.branch_cutoff = 2  # length to be cut from branch ends in mm
+        self.branch_cutoff = 1  # length to be cut from branch ends in mm
 
         self.centerlines = None     # raw centerlines (vtkPolyData)
         self.c_radii_lists = []     # processed centerline radii
         self.c_pos_lists = []       # processed centerline positions
         self.c_arc_lists = []       # processed centerline arc length (cumulated)
+        self.c_groupId_lists = []   # processed centerline branch group ids
         self.c_parent_indices = []  # index tuples for branch parent / branch point
         self.c_stenosis_lists = []  # lists of stenosis objects per centerline
 
         # model view
+        interactor_style = vtk.vtkInteractorStyleTrackballCamera()
         self.model_view = QVTKRenderWindowInteractor(self)
-        self.model_view.SetInteractorStyle(vtk.vtkInteractorStyleTrackballCamera())
+        self.model_view.SetInteractorStyle(interactor_style)
         self.renderer = vtk.vtkRenderer()
         self.renderer.SetBackground(1,1,1)
         cam = self.renderer.GetActiveCamera()
         cam.SetPosition(0, 0, -100)
         cam.SetFocalPoint(0, 0, 0)
         cam.SetViewUp(0, -1, 0)
+        cam.AddObserver("ModifiedEvent", self.cameraModifiedEvent)
         self.model_view.GetRenderWindow().AddRenderer(self.renderer)
 
         # graph view
         self.widget_lineplots = pg.GraphicsLayoutWidget()
         self.lineplots = []
-        # self.scatterplots_down = []
-        # self.scatterplots_up = []
 
         # combine all in a layout
         self.top_layout = QHBoxLayout(self)
@@ -246,8 +345,8 @@ class StenosisClassifierTab(QWidget):
         self.actor_lumen = vtk.vtkActor()
         self.actor_lumen.SetMapper(self.mapper_lumen)
         self.actor_lumen.GetProperty().SetColor(1,1,1)
-        self.actor_lumen.GetProperty().SetOpacity(0.7)
-        self.actor_lumen.GetProperty().FrontfaceCullingOn()
+        #self.actor_lumen.GetProperty().SetOpacity(0.7)
+        #self.actor_lumen.GetProperty().FrontfaceCullingOn()
 
         # centerline vtk pipeline
         self.reader_centerline = vtk.vtkXMLPolyDataReader()
@@ -276,6 +375,12 @@ class StenosisClassifierTab(QWidget):
         self.model_view.Disable()
         self.model_view.EnableRenderOff()
         super(StenosisClassifierTab, self).hideEvent(event)
+
+    
+    def cameraModifiedEvent(self, obj, ev):
+        for stenosis_list in self.c_stenosis_lists:
+            for stenosis in stenosis_list:
+                stenosis.update3DTextPos()
     
 
     def loadModels(self, lumen_file, centerline_file):
@@ -292,6 +397,7 @@ class StenosisClassifierTab(QWidget):
             self.reader_centerline.SetFileName(centerline_file)
             self.reader_centerline.Update()
             self.centerlines = self.reader_centerline.GetOutput()
+            self.__preprocessLumenMesh() # TODO do this only if GroupIds array does not exist on centerlines or mesh
             self.__preprocessCenterlines()
             self.plot_radii()
             self.draw_active_centerlines()
@@ -310,18 +416,46 @@ class StenosisClassifierTab(QWidget):
         self.renderer.ResetCamera()
         self.model_view.GetRenderWindow().Render()
 
+    
+    def __preprocessLumenMesh(self):
+        # split/group centerlines
+        extractor = vmtkscripts.vmtkBranchExtractor()
+        extractor.Centerlines = self.centerlines
+        extractor.Execute()
+        #self.centerlines = extractor.Centerlines
+        
+        # clip branches
+        clipper = vmtkscripts.vmtkBranchClipper()
+        clipper.Centerlines = extractor.Centerlines
+        clipper.Surface = self.reader_lumen.GetOutput()
+        #clipper.Execute()
+
+        # TODO save polydata with GroupIds arrays for cached use
+        # writer = vtk.vtkXMLPolyDataWriter()
+        # writer.SetFileName("C:\\Users\\Pepe Eulzer\\Desktop\\test_mesh.vtp")
+        # writer.SetInputData(clipper.Surface)
+        # writer.Write()
+        # writer.SetFileName("C:\\Users\\Pepe Eulzer\\Desktop\\test_centerlines.vtp")
+        # writer.SetInputData(extractor.Centerlines)
+        # writer.Write()
+        # print("Done processing lumen mesh!")
+
     def __preprocessCenterlines(self):
         # lists for each line in centerlines
         # lines are ordered source->outlet
         self.c_pos_lists = []      # 3xn numpy arrays with point positions
         self.c_arc_lists = []      # 1xn numpy arrays with arc length along centerline (accumulated)
         self.c_radii_lists = []    # 1xn numpy arrays with maximal inscribed sphere radius
+        self.c_groupId_lists = []  # 1xn numpy arrays with branch group id (only for mesh clipper!)
         self.c_parent_indices = [] # tuple per list: (parent idx, branch point idx)
         self.clearStenoses() # empties the list of actors and removes them from rendering
 
         # iterate all (global) lines
         # each line is a vtkIdList containing point ids in the right order
-        l = self.centerlines.GetLines()        
+        radii_flat = vtk_to_numpy(self.centerlines.GetPointData().GetArray('MaximumInscribedSphereRadius'))
+        #group_ids_flat = vtk_to_numpy(self.centerlines.GetCellData().GetArray('GroupIds'))
+        #print(group_ids_flat)
+        l = self.centerlines.GetLines()
         l.InitTraversal()
         for i in range(l.GetNumberOfCells()):
             pointIds = vtk.vtkIdList()
@@ -339,15 +473,20 @@ class StenosisClassifierTab(QWidget):
             arc = np.cumsum(arc)
 
             # retrieve radius data
-            radii_flat = vtk_to_numpy(self.centerlines.GetPointData().GetArray('MaximumInscribedSphereRadius'))
             r = np.zeros(pointIds.GetNumberOfIds())
             for j in range(pointIds.GetNumberOfIds()):
                 r[j] = radii_flat[pointIds.GetId(j)]
+
+            # retrieve group id data
+            g = np.zeros(pointIds.GetNumberOfIds())
+            # for j in range(pointIds.GetNumberOfIds()):
+            #     g[j] = group_ids_flat[i]
 
             # add to centerlines
             self.c_pos_lists.append(p)
             self.c_arc_lists.append(arc)
             self.c_radii_lists.append(r)
+            self.c_groupId_lists.append(g)
             self.c_parent_indices.append((i,0)) # points to own origin
             self.c_stenosis_lists.append([]) # for storing actors later
 
@@ -374,6 +513,7 @@ class StenosisClassifierTab(QWidget):
                 self.c_pos_lists[j] = self.c_pos_lists[j][split_index:]
                 self.c_arc_lists[j] = self.c_arc_lists[j][split_index:]
                 self.c_radii_lists[j] = self.c_radii_lists[j][split_index:]
+                self.c_groupId_lists[j] = self.c_groupId_lists[j][split_index:]
 
         # remove branches below the minimum length
         for i in range(len(self.c_arc_lists)-1, -1, -1):
@@ -381,6 +521,7 @@ class StenosisClassifierTab(QWidget):
                 del self.c_pos_lists[i]
                 del self.c_arc_lists[i]
                 del self.c_radii_lists[i]
+                del self.c_groupId_lists[i]
                 del self.c_parent_indices[i]
 
         # clip branch ends
@@ -391,13 +532,14 @@ class StenosisClassifierTab(QWidget):
             self.c_pos_lists[i] = self.c_pos_lists[i][clip_ids[0]:clip_ids[1]]
             self.c_arc_lists[i] = self.c_arc_lists[i][clip_ids[0]:clip_ids[1]]
             self.c_radii_lists[i] = self.c_radii_lists[i][clip_ids[0]:clip_ids[1]]
+            self.c_groupId_lists[i] = self.c_groupId_lists[i][clip_ids[0]:clip_ids[1]]
+
+        print(self.c_groupId_lists)
 
     
     def plot_radii(self):
         self.widget_lineplots.clear()
         self.lineplots = []
-        # self.scatterplots_down = []
-        # self.scatterplots_up = []
         
         for i in range(len(self.c_radii_lists)):
             lineplot = self.widget_lineplots.addPlot()
@@ -405,13 +547,9 @@ class StenosisClassifierTab(QWidget):
             lineplot.showGrid(x=False, y=True, alpha=0.2)
             self.lineplots.append(lineplot)
 
-            # s = lineplot.plot([], [], pen=None, symbolBrush=(255, 0, 0))
-            # self.scatterplots_down.append(s)
-            # s = lineplot.plot([], [], pen=None, symbolBrush=(0, 255, 0))
-            # self.scatterplots_up.append(s)
-
             # draw radius lineplot
             lineplot.plot(x=self.c_arc_lists[i], y=self.c_radii_lists[i], pen=LINE_COLORS_QT[i%5])
+            lineplot.disableAutoRange()
 
             # mark origin of subbranches
             subbranch_ids = []
@@ -420,7 +558,7 @@ class StenosisClassifierTab(QWidget):
                     subbranch_ids.append(index_tuple[1])
                     x = self.c_arc_lists[i][index_tuple[1]]
                     y = self.c_radii_lists[i][index_tuple[1]]
-                    lineplot.addItem(pg.InfiniteLine(pos=x, angle=90, pen=(0,0,0)))
+                    #lineplot.addItem(pg.InfiniteLine(pos=x, angle=90, pen=(0,0,0)))
                     lineplot.plot([x], [y], pen=None, symbolBrush=LINE_COLORS_QT[j%5])
             subbranch_ids = sorted(subbranch_ids)
 
@@ -514,12 +652,6 @@ class StenosisClassifierTab(QWidget):
         nr_stenoses = indices_down.size
         assert nr_stenoses == indices_up.size
 
-        # update debugging plots
-        # down_plot = self.scatterplots_down[lineROI.plot_id]
-        # down_plot.setData(arc[indices_down], np.full(nr_stenoses, r_thresh))
-        # up_plot = self.scatterplots_up[lineROI.plot_id]
-        # up_plot.setData(arc[indices_up], np.full(indices_up.size, r_thresh))
-
         # cleanup all stenoses with same start index
         for i in range(len(stenosis_list)-1, -1, -1):
             s = stenosis_list[i]
@@ -527,7 +659,7 @@ class StenosisClassifierTab(QWidget):
                 s.cleanup()
                 del s
 
-        # create stenosis object for each case
+        # create a stenosis object for each case
         for i in range(indices_down.size):
             idx1 = indices_down[i]
             idx2 = indices_up[i]
