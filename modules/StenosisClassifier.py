@@ -191,6 +191,7 @@ class StenosisWrapper(object):
         # create 3D text actor
         self.text_actor = vtk.vtkBillboardTextActor3D()
         self.text_actor.SetInput(self.degree_string)
+        self.text_actor.SetDisplayOffset(-20, -5)
         self.text_actor.GetTextProperty().SetFontSize(20)
         self.text_actor.GetTextProperty().SetColor(0, 0, 0)
         self.text_actor.GetTextProperty().SetBackgroundColor(1, 1, 240/255)
@@ -212,7 +213,7 @@ class StenosisWrapper(object):
         self.reference_marker3D.SetPoint2(self.pos[reference_idx+1])
         self.tube_filter = vtk.vtkTubeFilter()
         self.tube_filter.SetInputConnection(self.reference_marker3D.GetOutputPort())
-        self.tube_filter.SetRadius(self.rad[reference_idx])
+        self.tube_filter.SetRadius(1.5*self.rad[reference_idx])
         self.tube_filter.SetNumberOfSides(25)
         self.tube_filter.CappingOn()
         mapper = vtk.vtkPolyDataMapper()
@@ -244,9 +245,9 @@ class StenosisWrapper(object):
 
 
     def update3DTextPos(self):
-        cam_dir = np.array(self.vtk_renderer.GetActiveCamera().GetPosition()) - self.pos[self.text_idx]
-        cam_dir /= np.linalg.norm(cam_dir)
-        text_pos = self.pos[self.text_idx] + 2.0 * self.rad[self.text_idx] * cam_dir
+        cam_pos = np.array(self.vtk_renderer.GetActiveCamera().GetPosition())
+        view_dir = self.pos[self.text_idx] - cam_pos
+        text_pos = cam_pos + 0.7 * view_dir
         self.text_actor.SetPosition(text_pos)
 
     def referenceMoved(self):
@@ -260,7 +261,7 @@ class StenosisWrapper(object):
         self.text_item_full.setPlainText(self.full_description)
         self.reference_marker3D.SetPoint1(self.pos[idx-1])
         self.reference_marker3D.SetPoint2(self.pos[idx+1])
-        self.tube_filter.SetRadius(self.rad[idx])
+        self.tube_filter.SetRadius(1.5*self.rad[idx])
         self.vtk_renderer.GetRenderWindow().Render()
 
 
@@ -271,13 +272,13 @@ class StenosisWrapper(object):
         self.lineplot.addItem(self.text_item_full)
         self.stenosis_actor.GetProperty().SetColor(1,0,0)
         self.reference_actor.GetProperty().SetColor(1,0,0)
-        self.update3DTextPos() # TODO call when camera is moving?
+        self.update3DTextPos()
         self.vtk_renderer.GetRenderWindow().Render()
 
     
     def stenosisAreaHoverLeave(self):
         self.text_actor.SetInput(self.degree_string)
-        self.text_actor.SetDisplayOffset(0, 0)
+        self.text_actor.SetDisplayOffset(-20, -5)
         self.text_actor.GetTextProperty().SetBackgroundOpacity(0)
         self.lineplot.removeItem(self.text_item_full)
         self.stenosis_actor.GetProperty().SetColor(COLOR_LUMEN)
@@ -313,14 +314,16 @@ class StenosisClassifierTab(QWidget):
         self.c_stenosis_lists = []  # lists of stenosis objects per centerline
 
         # model view
+        interactor_style = vtk.vtkInteractorStyleTrackballCamera()
         self.model_view = QVTKRenderWindowInteractor(self)
-        self.model_view.SetInteractorStyle(vtk.vtkInteractorStyleTrackballCamera())
+        self.model_view.SetInteractorStyle(interactor_style)
         self.renderer = vtk.vtkRenderer()
         self.renderer.SetBackground(1,1,1)
         cam = self.renderer.GetActiveCamera()
         cam.SetPosition(0, 0, -100)
         cam.SetFocalPoint(0, 0, 0)
         cam.SetViewUp(0, -1, 0)
+        cam.AddObserver("ModifiedEvent", self.cameraModifiedEvent)
         self.model_view.GetRenderWindow().AddRenderer(self.renderer)
 
         # graph view
@@ -339,8 +342,8 @@ class StenosisClassifierTab(QWidget):
         self.actor_lumen = vtk.vtkActor()
         self.actor_lumen.SetMapper(self.mapper_lumen)
         self.actor_lumen.GetProperty().SetColor(1,1,1)
-        self.actor_lumen.GetProperty().SetOpacity(0.7)
-        self.actor_lumen.GetProperty().FrontfaceCullingOn()
+        #self.actor_lumen.GetProperty().SetOpacity(0.7)
+        #self.actor_lumen.GetProperty().FrontfaceCullingOn()
 
         # centerline vtk pipeline
         self.reader_centerline = vtk.vtkXMLPolyDataReader()
@@ -369,6 +372,12 @@ class StenosisClassifierTab(QWidget):
         self.model_view.Disable()
         self.model_view.EnableRenderOff()
         super(StenosisClassifierTab, self).hideEvent(event)
+
+    
+    def cameraModifiedEvent(self, obj, ev):
+        for stenosis_list in self.c_stenosis_lists:
+            for stenosis in stenosis_list:
+                stenosis.update3DTextPos()
     
 
     def loadModels(self, lumen_file, centerline_file):
@@ -507,7 +516,7 @@ class StenosisClassifierTab(QWidget):
                     subbranch_ids.append(index_tuple[1])
                     x = self.c_arc_lists[i][index_tuple[1]]
                     y = self.c_radii_lists[i][index_tuple[1]]
-                    lineplot.addItem(pg.InfiniteLine(pos=x, angle=90, pen=(0,0,0)))
+                    #lineplot.addItem(pg.InfiniteLine(pos=x, angle=90, pen=(0,0,0)))
                     lineplot.plot([x], [y], pen=None, symbolBrush=LINE_COLORS_QT[j%5])
             subbranch_ids = sorted(subbranch_ids)
 
