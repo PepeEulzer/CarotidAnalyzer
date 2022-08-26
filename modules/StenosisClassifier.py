@@ -9,6 +9,8 @@ from PyQt5.QtGui import QColor, QPainterPath
 from PyQt5.QtCore import Qt, QRectF, QLineF, pyqtSignal
 import pyqtgraph as pg
 
+from vmtk import vmtkscripts
+
 from defaults import *
 
 # Override pyqtgraph defaults
@@ -310,6 +312,7 @@ class StenosisClassifierTab(QWidget):
         self.c_radii_lists = []     # processed centerline radii
         self.c_pos_lists = []       # processed centerline positions
         self.c_arc_lists = []       # processed centerline arc length (cumulated)
+        self.c_groupId_lists = []   # processed centerline branch group ids
         self.c_parent_indices = []  # index tuples for branch parent / branch point
         self.c_stenosis_lists = []  # lists of stenosis objects per centerline
 
@@ -394,6 +397,7 @@ class StenosisClassifierTab(QWidget):
             self.reader_centerline.SetFileName(centerline_file)
             self.reader_centerline.Update()
             self.centerlines = self.reader_centerline.GetOutput()
+            self.__preprocessLumenMesh() # TODO do this only if GroupIds array does not exist on centerlines or mesh
             self.__preprocessCenterlines()
             self.plot_radii()
             self.draw_active_centerlines()
@@ -412,18 +416,46 @@ class StenosisClassifierTab(QWidget):
         self.renderer.ResetCamera()
         self.model_view.GetRenderWindow().Render()
 
+    
+    def __preprocessLumenMesh(self):
+        # split/group centerlines
+        extractor = vmtkscripts.vmtkBranchExtractor()
+        extractor.Centerlines = self.centerlines
+        extractor.Execute()
+        #self.centerlines = extractor.Centerlines
+        
+        # clip branches
+        clipper = vmtkscripts.vmtkBranchClipper()
+        clipper.Centerlines = extractor.Centerlines
+        clipper.Surface = self.reader_lumen.GetOutput()
+        #clipper.Execute()
+
+        # TODO save polydata with GroupIds arrays for cached use
+        # writer = vtk.vtkXMLPolyDataWriter()
+        # writer.SetFileName("C:\\Users\\Pepe Eulzer\\Desktop\\test_mesh.vtp")
+        # writer.SetInputData(clipper.Surface)
+        # writer.Write()
+        # writer.SetFileName("C:\\Users\\Pepe Eulzer\\Desktop\\test_centerlines.vtp")
+        # writer.SetInputData(extractor.Centerlines)
+        # writer.Write()
+        # print("Done processing lumen mesh!")
+
     def __preprocessCenterlines(self):
         # lists for each line in centerlines
         # lines are ordered source->outlet
         self.c_pos_lists = []      # 3xn numpy arrays with point positions
         self.c_arc_lists = []      # 1xn numpy arrays with arc length along centerline (accumulated)
         self.c_radii_lists = []    # 1xn numpy arrays with maximal inscribed sphere radius
+        self.c_groupId_lists = []  # 1xn numpy arrays with branch group id (only for mesh clipper!)
         self.c_parent_indices = [] # tuple per list: (parent idx, branch point idx)
         self.clearStenoses() # empties the list of actors and removes them from rendering
 
         # iterate all (global) lines
         # each line is a vtkIdList containing point ids in the right order
-        l = self.centerlines.GetLines()        
+        radii_flat = vtk_to_numpy(self.centerlines.GetPointData().GetArray('MaximumInscribedSphereRadius'))
+        #group_ids_flat = vtk_to_numpy(self.centerlines.GetCellData().GetArray('GroupIds'))
+        #print(group_ids_flat)
+        l = self.centerlines.GetLines()
         l.InitTraversal()
         for i in range(l.GetNumberOfCells()):
             pointIds = vtk.vtkIdList()
@@ -441,15 +473,20 @@ class StenosisClassifierTab(QWidget):
             arc = np.cumsum(arc)
 
             # retrieve radius data
-            radii_flat = vtk_to_numpy(self.centerlines.GetPointData().GetArray('MaximumInscribedSphereRadius'))
             r = np.zeros(pointIds.GetNumberOfIds())
             for j in range(pointIds.GetNumberOfIds()):
                 r[j] = radii_flat[pointIds.GetId(j)]
+
+            # retrieve group id data
+            g = np.zeros(pointIds.GetNumberOfIds())
+            # for j in range(pointIds.GetNumberOfIds()):
+            #     g[j] = group_ids_flat[i]
 
             # add to centerlines
             self.c_pos_lists.append(p)
             self.c_arc_lists.append(arc)
             self.c_radii_lists.append(r)
+            self.c_groupId_lists.append(g)
             self.c_parent_indices.append((i,0)) # points to own origin
             self.c_stenosis_lists.append([]) # for storing actors later
 
@@ -476,6 +513,7 @@ class StenosisClassifierTab(QWidget):
                 self.c_pos_lists[j] = self.c_pos_lists[j][split_index:]
                 self.c_arc_lists[j] = self.c_arc_lists[j][split_index:]
                 self.c_radii_lists[j] = self.c_radii_lists[j][split_index:]
+                self.c_groupId_lists[j] = self.c_groupId_lists[j][split_index:]
 
         # remove branches below the minimum length
         for i in range(len(self.c_arc_lists)-1, -1, -1):
@@ -483,6 +521,7 @@ class StenosisClassifierTab(QWidget):
                 del self.c_pos_lists[i]
                 del self.c_arc_lists[i]
                 del self.c_radii_lists[i]
+                del self.c_groupId_lists[i]
                 del self.c_parent_indices[i]
 
         # clip branch ends
@@ -493,6 +532,9 @@ class StenosisClassifierTab(QWidget):
             self.c_pos_lists[i] = self.c_pos_lists[i][clip_ids[0]:clip_ids[1]]
             self.c_arc_lists[i] = self.c_arc_lists[i][clip_ids[0]:clip_ids[1]]
             self.c_radii_lists[i] = self.c_radii_lists[i][clip_ids[0]:clip_ids[1]]
+            self.c_groupId_lists[i] = self.c_groupId_lists[i][clip_ids[0]:clip_ids[1]]
+
+        print(self.c_groupId_lists)
 
     
     def plot_radii(self):
