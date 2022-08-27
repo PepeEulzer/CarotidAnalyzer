@@ -6,10 +6,8 @@ from vtk.util.numpy_support import vtk_to_numpy
 from vtk.qt.QVTKRenderWindowInteractor import QVTKRenderWindowInteractor
 from PyQt5.QtWidgets import QWidget, QHBoxLayout, QTabWidget, QGraphicsPathItem
 from PyQt5.QtGui import QColor, QPainterPath
-from PyQt5.QtCore import Qt, QRectF, QLineF, pyqtSignal
+from PyQt5.QtCore import Qt, QRectF, QLineF
 import pyqtgraph as pg
-
-from vmtk import vmtkscripts
 
 from defaults import *
 
@@ -119,44 +117,40 @@ class StenosisWrapper(object):
         self.rad = rad_array
         self.arc = arc_array
 
-        # compute normals
-        n1 = np.mean(self.pos[idx1:idx1+6], axis=0) - np.mean(self.pos[idx1-5:idx1+1], axis=0)
-        n2 = np.mean(self.pos[idx2-5:idx2+1], axis=0) - np.mean(self.pos[idx2:idx2+6], axis=0)
+        # compute implicit spheres around stenosis region
+        clip_function_spheres = vtk.vtkImplicitBoolean()
+        clip_function_spheres.SetOperationTypeToUnion()
+        for idx in range(idx1, idx2, 10):
+            sphere = vtk.vtkSphere()
+            sphere.SetCenter(self.pos[idx])
+            sphere.SetRadius(2*self.rad[idx])
+            clip_function_spheres.AddFunction(sphere)
 
-        # cut lower end
-        plane = vtk.vtkPlane()
-        plane.SetOrigin(self.pos[idx1])
-        plane.SetNormal(n1)
-        clipper = vtk.vtkClipPolyData()
-        clipper.SetInputDataObject(vessel_geometry)
-        clipper.SetClipFunction(plane)
-        clipper.SetInsideOut(False)
-        clipper.Update()
-        clipped = clipper.GetOutput()
+        # compute implicit planes to cap stenosis region
+        plane1 = vtk.vtkPlane()
+        plane1.SetOrigin(self.pos[idx1])
+        plane1.SetNormal(np.mean(self.pos[idx1-5:idx1+1] - self.pos[idx1:idx1+6], axis=0))
+        plane2 = vtk.vtkPlane()
+        plane2.SetOrigin(self.pos[idx2])
+        plane2.SetNormal(np.mean(self.pos[idx2:idx2+6] - self.pos[idx2-5:idx2+1], axis=0))
 
-        # cut upper end
-        plane = vtk.vtkPlane()
-        plane.SetOrigin(self.pos[idx2])
-        plane.SetNormal(n2)
-        clipper = vtk.vtkClipPolyData()
-        clipper.SetInputDataObject(clipped)
-        clipper.SetClipFunction(plane)
-        clipper.SetInsideOut(False)
-        clipper.Update()
+        clip_function = vtk.vtkImplicitBoolean()
+        clip_function.SetOperationTypeToIntersection()
+        clip_function.AddFunction(clip_function_spheres)
+        clip_function.AddFunction(plane1)
+        clip_function.AddFunction(plane2)
 
-        # remove unwanted branches
-        connectivityFilter = vtk.vtkConnectivityFilter()
-        connectivityFilter.SetInputConnection(clipper.GetOutputPort())
-        connectivityFilter.SetClosestPoint(self.pos[idx1])
-        connectivityFilter.SetExtractionModeToClosestPointRegion()
-        connectivityFilter.ColorRegionsOff()
-        connectivityFilter.Update()
+        self.clipper = vtk.vtkClipPolyData()
+        self.clipper.SetInputDataObject(vessel_geometry)
+        self.clipper.SetClipFunction(clip_function)
+        self.clipper.SetInsideOut(True)
+        self.clipper.Update()
 
         # create 3D stenosis actor
-        mapper = vtk.vtkPolyDataMapper()
-        mapper.SetInputData(connectivityFilter.GetOutput())
+        self.mapper = vtk.vtkPolyDataMapper()
+        self.mapper.SetInputConnection(self.clipper.GetOutputPort())
         self.stenosis_actor = vtk.vtkActor()
-        self.stenosis_actor.SetMapper(mapper)
+        self.stenosis_actor.SetMapper(self.mapper)
         self.stenosis_actor.GetProperty().SetColor(COLOR_LUMEN)
         self.vtk_renderer.AddActor(self.stenosis_actor)
 
@@ -244,6 +238,14 @@ class StenosisWrapper(object):
         self.full_description =  f'Stenosis degree (NASCET): {self.degree_string}\n'\
                                  f'Smallest inner radius: {self.nascet_min_val:.1f} mm\n'\
                                  f'Stenosis length: {self.stenosis_arc_len:.1f} mm'
+
+    
+    def removeUnconnectedGeometry(self):
+        connectivityFilter = vtk.vtkConnectivityFilter()
+        connectivityFilter.SetInputConnection(self.clipper.GetOutputPort())
+        connectivityFilter.SetExtractionModeToLargestRegion()
+        connectivityFilter.ColorRegionsOff()
+        self.mapper.SetInputConnection(connectivityFilter.GetOutputPort())
 
 
     def update3DTextPos(self):
@@ -340,13 +342,20 @@ class StenosisClassifierTab(QWidget):
 
         # lumen vtk pipeline
         self.reader_lumen = vtk.vtkSTLReader()
+        normals = vtk.vtkPolyDataNormals()
+        normals.SetInputConnection(self.reader_lumen.GetOutputPort())
+        normals.SplittingOff()
+        warp = vtk.vtkWarpVector()
+        warp.SetInputConnection(normals.GetOutputPort())
+        warp.SetInputArrayToProcess(0, 0, 0, vtk.vtkDataObject.FIELD_ASSOCIATION_POINTS, vtk.vtkDataSetAttributes.NORMALS)
+        warp.SetScaleFactor(-0.01) # shrink lumen by small factor to resolve stenosis geometry overlaps
         self.mapper_lumen = vtk.vtkPolyDataMapper()
-        self.mapper_lumen.SetInputConnection(self.reader_lumen.GetOutputPort())
+        self.mapper_lumen.SetInputConnection(warp.GetOutputPort())
         self.actor_lumen = vtk.vtkActor()
         self.actor_lumen.SetMapper(self.mapper_lumen)
         self.actor_lumen.GetProperty().SetColor(1,1,1)
         #self.actor_lumen.GetProperty().SetOpacity(0.7)
-        #self.actor_lumen.GetProperty().FrontfaceCullingOn()
+        # self.actor_lumen.GetProperty().FrontfaceCullingOn()
 
         # centerline vtk pipeline
         self.reader_centerline = vtk.vtkXMLPolyDataReader()
@@ -397,7 +406,6 @@ class StenosisClassifierTab(QWidget):
             self.reader_centerline.SetFileName(centerline_file)
             self.reader_centerline.Update()
             self.centerlines = self.reader_centerline.GetOutput()
-            self.__preprocessLumenMesh() # TODO do this only if GroupIds array does not exist on centerlines or mesh
             self.__preprocessCenterlines()
             self.plot_radii()
             self.draw_active_centerlines()
@@ -416,29 +424,6 @@ class StenosisClassifierTab(QWidget):
         self.renderer.ResetCamera()
         self.model_view.GetRenderWindow().Render()
 
-    
-    def __preprocessLumenMesh(self):
-        # split/group centerlines
-        extractor = vmtkscripts.vmtkBranchExtractor()
-        extractor.Centerlines = self.centerlines
-        extractor.Execute()
-        #self.centerlines = extractor.Centerlines
-        
-        # clip branches
-        clipper = vmtkscripts.vmtkBranchClipper()
-        clipper.Centerlines = extractor.Centerlines
-        clipper.Surface = self.reader_lumen.GetOutput()
-        #clipper.Execute()
-
-        # TODO save polydata with GroupIds arrays for cached use
-        # writer = vtk.vtkXMLPolyDataWriter()
-        # writer.SetFileName("C:\\Users\\Pepe Eulzer\\Desktop\\test_mesh.vtp")
-        # writer.SetInputData(clipper.Surface)
-        # writer.Write()
-        # writer.SetFileName("C:\\Users\\Pepe Eulzer\\Desktop\\test_centerlines.vtp")
-        # writer.SetInputData(extractor.Centerlines)
-        # writer.Write()
-        # print("Done processing lumen mesh!")
 
     def __preprocessCenterlines(self):
         # lists for each line in centerlines
@@ -534,9 +519,7 @@ class StenosisClassifierTab(QWidget):
             self.c_radii_lists[i] = self.c_radii_lists[i][clip_ids[0]:clip_ids[1]]
             self.c_groupId_lists[i] = self.c_groupId_lists[i][clip_ids[0]:clip_ids[1]]
 
-        print(self.c_groupId_lists)
 
-    
     def plot_radii(self):
         self.widget_lineplots.clear()
         self.lineplots = []
@@ -576,6 +559,7 @@ class StenosisClassifierTab(QWidget):
                 selection_line = LineROI(i, x_min, x_max, y_pos=min_y, y_bounds=[min_y, mean_y], angle=0, movable=True)
                 lineplot.addItem(selection_line)
                 selection_line.sigPositionChanged[object].connect(self.lineROIposChanged)
+                selection_line.sigPositionChangeFinished[object].connect(self.lineROIPosChangeFinished)
 
             # next graph
             self.widget_lineplots.nextRow()
@@ -683,6 +667,12 @@ class StenosisClassifierTab(QWidget):
                                        idx2) 
             stenosis_list.append(stenosis)
 
+        self.model_view.GetRenderWindow().Render()
+
+
+    def lineROIPosChangeFinished(self, lineROI):
+        for stenosis in self.c_stenosis_lists[lineROI.plot_id]:
+            stenosis.removeUnconnectedGeometry()
         self.model_view.GetRenderWindow().Render()
 
 
