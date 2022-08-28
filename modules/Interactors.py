@@ -234,7 +234,6 @@ class IsosurfaceInteractor(QVTKRenderWindowInteractor):
 
 
     def reset(self):
-        # self.label_map = vtk.vtkImageData()
         self.renderer.RemoveActor(self.actor_lumen)
         self.renderer.RemoveActor(self.actor_plaque)
         self.GetRenderWindow().Render()
