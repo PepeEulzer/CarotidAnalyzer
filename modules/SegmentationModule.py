@@ -59,7 +59,7 @@ class SegmentationModuleTab(QWidget):
         self.auto_update_box.setVisible(False)
         self.auto_update_box.setChecked(True)
         self.manual_update_button.setVisible(False)
-        self.manual_update_button.setEnabled(False)  #  set False when connected to checkbox 
+        self.manual_update_button.setEnabled(False)  
         self.eraser_button.setVisible(False)
         self.stop_editing_button.setVisible(False)
         self.lumen_button.setVisible(False)
@@ -92,21 +92,8 @@ class SegmentationModuleTab(QWidget):
         self.edit_buttons_layout.addWidget(self.brush_slider_label, 4,0,1,2)
         self.edit_buttons_layout.addWidget(self.brush_size_slider, 5,0,1,2)
         self.edit_buttons_layout.addWidget(self.stop_editing_button, 6,0,1,2)
-        self.edit_buttons_layout.setRowStretch(8,1)  
+        self.edit_buttons_layout.setRowStretch(8,1) 
 
-        """self.brush_buttons_layout = QGridLayout()
-        self.brush_buttons_layout.setVerticalSpacing(30)  
-        self.brush_buttons_layout.addWidget(self.brush_2D, 0,0)
-        self.brush_buttons_layout.addWidget(self.brush_3D, 0,1)
-        self.brush_buttons_layout.addWidget(self.auto_update_box, 1,0)
-        self.brush_buttons_layout.addWidget(self.manual_update_button, 1,1)
-        self.brush_buttons_layout.addWidget(self.lumen_button, 2,0)
-        self.brush_buttons_layout.addWidget(self.plaque_button, 2,1)
-        self.brush_buttons_layout.addWidget(self.eraser_button, 3,0,1,2)
-        self.brush_buttons_layout.addWidget(self.brush_slider_label, 4,0,1,2)
-        self.brush_buttons_layout.addWidget(self.brush_size_slider, 5,0,1,2)
-        self.edit_buttons_layout.setRowStretch(6,1)  """
-        
         self.top_layout = QHBoxLayout(self)
         self.top_layout.addLayout(self.slice_view_layout)
         self.top_layout.addLayout(self.edit_buttons_layout)
@@ -130,8 +117,6 @@ class SegmentationModuleTab(QWidget):
         self.brush_button.pressed.connect(self.drawMode)  
         self.brush_2D.pressed.connect(self.set2DBrush)
         self.brush_3D.pressed.connect(self.set3DBrush)
-        # how to connect checking action with updating? -> doc: connect with signal 
-        # self.auto_update_box.isChecked()
         self.auto_update_box.stateChanged.connect(self.checkUpdateMode)
         self.manual_update_button.pressed.connect(self.update_3Ddisplay)
         self.brush_size_slider.valueChanged[int].connect(self.brushSizeChanged)
@@ -294,7 +279,8 @@ class SegmentationModuleTab(QWidget):
 
     def activateEditing(self): 
         # show all buttons that are needed for editing
-        self.editing_active = True 
+        #self.editing_active = True 
+        #self.edit_layout_widget.setVisible(True)
         self.brush_button.setVisible(True)
         self.stop_editing_button.setVisible(True)
         self.edit_button.setEnabled(False)
@@ -319,11 +305,8 @@ class SegmentationModuleTab(QWidget):
         self.manual_update_button.setVisible(False)
         self.stop_editing_button.setVisible(False)
         self.lumen_button.setVisible(False)
-        #self.lumen_button.setStyleSheet("background-color: light gray")
         self.plaque_button.setVisible(False)
-        #self.plaque_button.setStyleSheet("background-color: light gray")
         self.eraser_button.setVisible(False)
-        #self.eraser_button.setStyleSheet("background-color: light gray")
         self.brush_size_slider.setVisible(False)
         self.brush_slider_label.setVisible(False)
         self.edit_button.setEnabled(True)
@@ -368,18 +351,21 @@ class SegmentationModuleTab(QWidget):
         self.slice_view.GetRenderWindow().Render()   
 
     def set2DBrush(self):
+        # set up 2D brush 
         self.draw3D = False
         self.brushSizeChanged(round(self.brush_size/self.image.GetSpacing()[0]))  
         self.brush_2D.setStyleSheet("background-color: rgb(175,175,175)")
         self.brush_3D.setStyleSheet("background-color: light gray")
         
     def set3DBrush(self):
+        # set up 3D brush 
         self.draw3D = True
-        self.brushSizeChanged(round(self.brush_size/self.image.GetSpacing()[0]))  # or additional method?
+        self.brushSizeChanged(round(self.brush_size/self.image.GetSpacing()[0]))  
         self.brush_3D.setStyleSheet("background-color: rgb(175,175,175)")
         self.brush_2D.setStyleSheet("background-color: light gray")
 
-    def checkUpdateMode(self):  #  geht das vielleicht auch eleganter vielleicht mit clicked(!)/pressed/checkstate?
+    def checkUpdateMode(self):
+        # check if changes by brush should be updated manually or automatically 
         if self.auto_update_box.isChecked():
             self.manual_update_button.setEnabled(False)
         else: 
@@ -410,7 +396,7 @@ class SegmentationModuleTab(QWidget):
     
     def drawMode(self):  
         self.slice_view.interactor_style.AddObserver("MouseMoveEvent", self.pickPosition)
-        self.slice_view.interactor_style.AddObserver("LeftButtonPressEvent", self.start_draw)  # remove at some point?
+        self.slice_view.interactor_style.AddObserver("LeftButtonPressEvent", self.start_draw)  # remove at some point?cd C:
         self.brush_button.setVisible(False)
         self.brush_2D.setVisible(True)
         self.brush_3D.setVisible(True)
@@ -471,7 +457,7 @@ class SegmentationModuleTab(QWidget):
             self.label_map_data[x0:x1,y0:y1,z][mask] = self.draw_value
         #!!! FEHLER: index 2 is out of bounds for axis 1 with size 0  --> ist das bei Pepes Branch auch so??
         # ist dimension des Bildes anders als die der LM?
-            print(self.image.GetExtent(), self.label_map.GetExtent())  # output: (0, 119, 0, 149, 0, 259) (0, 119, 0, 143, 0, 247) -> label map hat weniger slices als extent (ist das nur bei mir/diesen Daten so oder generell? - zumindest in den Daten, die ich hab)
+            #print(self.image.GetExtent(), self.label_map.GetExtent())  # output: (0, 119, 0, 149, 0, 259) (0, 119, 0, 143, 0, 247) -> label map hat weniger slices als extent (ist das nur bei mir/diesen Daten so oder generell? - zumindest in den Daten, die ich hab)
             # -> catch: label map und image nicht die gleiche Größe -> label map array anpassen??
         else: 
             # draw sphere
@@ -493,7 +479,7 @@ class SegmentationModuleTab(QWidget):
         self.slice_view.interactor_style.RemoveObservers(id)  
         self.slice_view.interactor_style.AddObserver("MouseMoveEvent", self.pickPosition)
 
-        if self.auto_update_box.isChecked():
+        if self.auto_update_box.isChecked():  # update if auto-update checkbox is checked
             self.update_3Ddisplay()
         
     def update_3Ddisplay(self):
