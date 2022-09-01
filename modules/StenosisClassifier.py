@@ -38,7 +38,7 @@ Q_COLOR_BLACK = pg.mkColor(0, 0, 0)
 
 class LineROI(pg.InfiniteLine):
     """
-    Draggable horizontal line that stops at branch boundaries in radius plots.
+    Draggable horizontal line that stops at branch boundaries in diameter plots.
     """
     def __init__(self, plot_id, x_start, x_end, y_pos=None, angle=90, pen=None, movable=False, y_bounds=None,
                  hoverPen=None, label=None, labelOpts=None, name=None):
@@ -184,14 +184,14 @@ class StenosisWrapper(object):
 
         # create 2D stenosis area
         area_x = self.arc[idx1:idx2]
-        area_y = self.rad[idx1:idx2]
+        area_y = 2.0 * self.rad[idx1:idx2]
         h = lineROI.getYPos()
         path = QPainterPath()
-        x1 = self.__getLineIntersection(self.arc[idx1-1], self.arc[idx1], self.rad[idx1-1], self.rad[idx1], h)
+        x1 = self.__getLineIntersection(self.arc[idx1-1], self.arc[idx1], 2.0 * self.rad[idx1-1], 2.0 * self.rad[idx1], h)
         path.moveTo(x1, h)
         for i in range(area_x.shape[0]):
             path.lineTo(area_x[i], area_y[i])
-        x2 = self.__getLineIntersection(self.arc[idx2-1], self.arc[idx2], self.rad[idx2-1], self.rad[idx2], h)
+        x2 = self.__getLineIntersection(self.arc[idx2-1], self.arc[idx2], 2.0 * self.rad[idx2-1], 2.0 * self.rad[idx2], h)
         path.lineTo(x2, h)
         self.stenosis_area = StenosisAreaItem(self.stenosisAreaHoverEnter,
                                               self.stenosisAreaHoverLeave,
@@ -201,7 +201,7 @@ class StenosisWrapper(object):
         self.lineplot.addItem(self.stenosis_area)
 
         # calculate stenosis degree and information
-        self.nascet_min_val = np.min(self.rad[idx1:idx2])
+        self.nascet_min_dia = 2.0 * np.min(self.rad[idx1:idx2])
         half_stenosis_length = int((idx2 - idx1)/2)
         self.stenosis_arc_len = self.arc[idx2] - self.arc[idx1]
         reference_idx = min(idx2 + half_stenosis_length, self.pos.shape[0]-2)
@@ -210,9 +210,9 @@ class StenosisWrapper(object):
         # create 2D text actor
         self.text_idx = idx1 + half_stenosis_length
         self.text_item = pg.TextItem(self.degree_string, color=Q_COLOR_BLACK, anchor=(0.5, 0))
-        self.text_item.setPos(self.arc[self.text_idx], self.nascet_min_val)
+        self.text_item.setPos(self.arc[self.text_idx], self.nascet_min_dia)
         self.text_item_full = pg.TextItem(self.full_description, color=Q_COLOR_BLACK, anchor=(0.5, 0))
-        self.text_item_full.setPos(self.arc[self.text_idx], self.nascet_min_val)
+        self.text_item_full.setPos(self.arc[self.text_idx], self.nascet_min_dia)
         self.text_item_full.fill = TEXT_BG_BRUSH
         self.lineplot.addItem(self.text_item) # draw above lines
 
@@ -265,10 +265,12 @@ class StenosisWrapper(object):
 
         
     def __computeStenosisDegree(self, ref_idx):
-        degree = (1 - self.nascet_min_val / self.rad[ref_idx]) * 100.0
+        nascet_ref_dia = 2.0 * self.rad[ref_idx]
+        degree = ((nascet_ref_dia - self.nascet_min_dia) / nascet_ref_dia) * 100.0
         self.degree_string = f'{degree:.1f}%'
         self.full_description =  f'Stenosis degree (NASCET): {self.degree_string}\n'\
-                                 f'Smallest inner radius: {self.nascet_min_val:.1f} mm\n'\
+                                 f'Smallest inner diameter: {self.nascet_min_dia:.1f} mm\n'\
+                                 f'Reference diameter: {nascet_ref_dia:.1f} mm\n'\
                                  f'Stenosis length: {self.stenosis_arc_len:.1f} mm'
 
     
@@ -571,13 +573,13 @@ class StenosisClassifierTab(QWidget):
 
     
     def linePlotHoverEnter(self, lineplot):
-        self.radius_plots[lineplot.plotID].setPen(LINEPLOT_WIDE_PEN)
+        self.diameter_plots[lineplot.plotID].setPen(LINEPLOT_WIDE_PEN)
         self.renderer.AddActor(self.branch_actors[lineplot.plotID])
         self.renderer.GetRenderWindow().Render()
 
     
     def linePlotHoverLeave(self, lineplot):
-        self.radius_plots[lineplot.plotID].setPen(LINEPLOT_DEFAULT_PEN)
+        self.diameter_plots[lineplot.plotID].setPen(LINEPLOT_DEFAULT_PEN)
         self.renderer.RemoveActor(self.branch_actors[lineplot.plotID])
         self.renderer.GetRenderWindow().Render()
 
@@ -585,21 +587,21 @@ class StenosisClassifierTab(QWidget):
     def plot_radii(self):
         self.widget_lineplots.clear()
         self.lineplots = []
-        self.radius_plots = []
+        self.diameter_plots = []
         dashed_pen = pg.mkPen({'color':(0,0,0), 'width':0.5, 'style':Qt.DashLine})
         
         for i in range(len(self.c_radii_lists)):
             lineplot = HoverablePlotItem(i)
             lineplot.sigHoverEnter[object].connect(self.linePlotHoverEnter)
             lineplot.sigHoverLeave[object].connect(self.linePlotHoverLeave)
-            lineplot.setLabel('left', "Minimal Radius (mm)")
+            lineplot.setLabel('left', "Minimal Diameter (mm)")
             lineplot.showGrid(x=False, y=True, alpha=0.2)
             self.widget_lineplots.addItem(lineplot)
             self.lineplots.append(lineplot)
 
-            # draw radius lineplot
-            r_plot = lineplot.plot(x=self.c_arc_lists[i], y=self.c_radii_lists[i], pen=LINEPLOT_DEFAULT_PEN)
-            self.radius_plots.append(r_plot)
+            # draw diemeter lineplot
+            d_plot = lineplot.plot(x=self.c_arc_lists[i], y=2.0*self.c_radii_lists[i], pen=LINEPLOT_DEFAULT_PEN)
+            self.diameter_plots.append(d_plot)
             lineplot.disableAutoRange()
 
             # mark origin of subbranches
@@ -619,10 +621,10 @@ class StenosisClassifierTab(QWidget):
                 id1 = subbranch_ids[j+1]
                 x_min = self.c_arc_lists[i][id0]
                 x_max = self.c_arc_lists[i][id1]
-                mean_y = np.mean(self.c_radii_lists[i][id0:id1])
-                min_y = np.min(self.c_radii_lists[i][id0:id1])
-                min_y -= 0.01 * (mean_y-min_y) # small offset below lowest value
-                selection_line = LineROI(i, x_min, x_max, y_pos=min_y, y_bounds=[min_y, mean_y],
+                max_y = 2.0 * np.max(self.c_radii_lists[i][id0:id1])
+                min_y = 2.0 * np.min(self.c_radii_lists[i][id0:id1])
+                min_y -= 0.01 * (max_y-min_y) # small offset below lowest value
+                selection_line = LineROI(i, x_min, x_max, y_pos=min_y, y_bounds=[min_y, max_y],
                                          angle=0, movable=True, pen={'color':(0,0,0), 'width':1})
                 lineplot.addItem(selection_line)
                 selection_line.sigPositionChanged[object].connect(self.lineROIposChanged)
@@ -633,13 +635,13 @@ class StenosisClassifierTab(QWidget):
 
         # link axes, set view ranges
         max_x = self.c_arc_lists[0][-1]
-        min_y = np.min(self.c_radii_lists[0])
-        max_y = np.max(self.c_radii_lists[0])
+        min_y = 2.0 * np.min(self.c_radii_lists[0])
+        max_y = 2.0 * np.max(self.c_radii_lists[0])
         self.lineplots[0].setYRange(min_y, max_y, padding=0.15)
         for i in range(1, len(self.lineplots)):
             self.lineplots[i].setXLink(self.lineplots[0])
-            min_y = np.min(self.c_radii_lists[i])
-            max_y = np.max(self.c_radii_lists[i])
+            min_y = 2.0 * np.min(self.c_radii_lists[i])
+            max_y = 2.0 * np.max(self.c_radii_lists[i])
             self.lineplots[i].setYRange(min_y, max_y, padding=0.15)
             if self.c_arc_lists[i][-1] > max_x:
                 max_x = self.c_arc_lists[i][-1]
@@ -662,7 +664,7 @@ class StenosisClassifierTab(QWidget):
         rad = self.c_radii_lists[lineROI.plot_id]
         arc = self.c_arc_lists[lineROI.plot_id]
         stenosis_list = self.c_stenosis_lists[lineROI.plot_id]
-        r_thresh = lineROI.getYPos()
+        r_thresh = lineROI.getYPos() / 2.0
 
         start_index = np.searchsorted(arc, lineROI.x_start)
         end_index = np.searchsorted(arc, lineROI.x_end) + 1
