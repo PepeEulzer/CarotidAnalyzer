@@ -3,7 +3,7 @@ from PyQt5.QtCore import Qt
 from PyQt5.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QSlider, QPushButton
 from vmtk import vmtkscripts
 
-from defaults import COLOR_LEFT, COLOR_LEFT_HEX, COLOR_RIGHT, COLOR_RIGHT_HEX
+from defaults import *
 from modules.Interactors import ImageSliceInteractor, VolumeRenderingInteractor
 
 class CropModule(QWidget):
@@ -40,14 +40,33 @@ class CropModule(QWidget):
         self.box_right_actor.GetProperty().SetDiffuse(0.0)
         self.box_right_actor.SetMapper(self.box_left_mapper)
         self.box_right_actor.SetMapper(self.box_right_mapper)
+
+        self.box_selection_source = vtk.vtkCubeSource()
+        self.box_selection_mapper = vtk.vtkPolyDataMapper()
+        self.box_selection_mapper.SetInputConnection(self.box_selection_source.GetOutputPort())
+        self.box_selection_actor = vtk.vtkActor()
+        self.box_selection_actor.GetProperty().ShadingOff()
+        self.box_selection_actor.GetProperty().SetRepresentationToWireframe()
+        self.box_selection_actor.GetProperty().SetLineWidth(2.0)
+        self.box_selection_actor.GetProperty().SetAmbient(1.0)
+        self.box_selection_actor.GetProperty().SetDiffuse(0.0)
+        self.box_selection_actor.SetMapper(self.box_selection_mapper)
+        self.box_selection_actor.SetMapper(self.box_selection_mapper)
+
+        # prop picker for clicking on image
+        self.picker = vtk.vtkPropPicker()
         
         self.slice_view = ImageSliceInteractor(self)
         self.volume_view = VolumeRenderingInteractor(self)
         self.slice_view_slider = QSlider(Qt.Horizontal)
         self.button_set_left = QPushButton("Set Left Volume")
-        self.button_set_left.setStyleSheet("background-color:" + COLOR_LEFT_HEX)
+        self.button_set_left.setStyleSheet("color:" + COLOR_LEFT_HEX)
+        self.button_set_left.setCheckable(True)
+        self.button_set_left.setEnabled(False)
         self.button_set_right = QPushButton("Set Right Volume")
-        self.button_set_right.setStyleSheet("background-color:" + COLOR_RIGHT_HEX)
+        self.button_set_right.setStyleSheet("color:" + COLOR_RIGHT_HEX)
+        self.button_set_right.setCheckable(True)
+        self.button_set_right.setEnabled(False)
 
         self.cut_left_actor = self.__getCutActor(self.box_left_source.GetOutputPort(), COLOR_LEFT)
         self.cut_right_actor = self.__getCutActor(self.box_right_source.GetOutputPort(), COLOR_RIGHT)
@@ -66,8 +85,8 @@ class CropModule(QWidget):
         # connect signals/slots
         self.slice_view.slice_changed[int].connect(self.sliceChanged)
         self.slice_view_slider.valueChanged[int].connect(self.slice_view.setSlice)
-        self.button_set_left.clicked.connect(self.setLeftVolume)
-        self.button_set_right.clicked.connect(self.setRightVolume)
+        self.button_set_left.clicked[bool].connect(self.setLeftVolume)
+        self.button_set_right.clicked[bool].connect(self.setRightVolume)
 
         # initialize VTK
         self.slice_view.Initialize()
@@ -95,13 +114,74 @@ class CropModule(QWidget):
         self.slice_view_slider.setSliderPosition(slice_nr)
         self.volume_view.Render()
 
+    
+    def pickWorldPosition(self, obj, event):
+        # pick current mouse position, screen coordinates
+        x_view, y_view = self.slice_view.GetEventPosition()  
 
-    def setLeftVolume(self):
-        print("Setting left volume...")
-        print("NOT IMPLEMENTED")
+        # world coordinates 
+        self.picker.Pick(x_view, y_view, self.slice_view.slice, self.slice_view.renderer) 
+        x,y,z = self.picker.GetPickPosition()
+
+        # move selection box
+        xs, ys, zs = self.crop_volume_size
+        self.box_selection_source.SetBounds(x - xs, x + xs,
+                                            y - ys, y + ys,
+                                            z - zs, z + zs)
+
+        # update scenes
+        self.slice_view.GetRenderWindow().Render()
+        self.volume_view.GetRenderWindow().Render()
+
+
+    def setLeftVolume(self, activated):
+        if activated:
+            self.box_selection_actor.GetProperty().SetColor(COLOR_LEFT_LIGHT)
+            self.slice_view.renderer.AddActor(self.box_selection_actor)
+            self.volume_view.renderer.AddActor(self.box_selection_actor)
+            self.mouse_move_observer = self.slice_view.interactor_style.AddObserver("MouseMoveEvent", self.pickWorldPosition)
+            self.left_click_observer = self.slice_view.interactor_style.AddObserver("LeftButtonPressEvent", self.setLeftVolumeFinished)
+        else:
+            self.slice_view.interactor_style.RemoveObserver(self.mouse_move_observer)
+            self.slice_view.interactor_style.RemoveObserver(self.left_click_observer)
+            self.slice_view.renderer.RemoveActor(self.box_selection_actor)
+            self.volume_view.renderer.RemoveActor(self.box_selection_actor)
+            self.slice_view.GetRenderWindow().Render()
+            self.volume_view.GetRenderWindow().Render()
+
+    
+    def setLeftVolumeFinished(self, obj, event):
+        # pick current mouse position, screen coordinates
+        x_view, y_view = self.slice_view.GetEventPosition()  
+
+        # world coordinates 
+        self.picker.Pick(x_view, y_view, self.slice_view.slice, self.slice_view.renderer) 
+        pos = self.picker.GetPickPosition()
+
+        # discrete image coordinates
+        origin = self.image.GetOrigin()
+        spacing = self.image.GetSpacing()
+        x,y,z = (int(round((pos[0] - origin[0]) / spacing[0])), 
+                 int(round((pos[1] - origin[1]) / spacing[1])), 
+                 int(self.slice_view.slice))
+
+        # set crop volume
+        print("Crop volume around center ", x, ", ", y, ", ", z)
+        # TODO crop volume: center +- 30, 36, 62
+        # TODO sinc filter scale resolution * 2
+        # TODO emit data modified
+
+        # reset observers and scene
+        self.button_set_left.setChecked(False)
+        self.slice_view.interactor_style.RemoveObserver(self.mouse_move_observer)
+        self.slice_view.interactor_style.RemoveObserver(self.left_click_observer)
+        self.slice_view.renderer.RemoveActor(self.box_selection_actor)
+        self.volume_view.renderer.RemoveActor(self.box_selection_actor)
+        self.slice_view.GetRenderWindow().Render()
+        self.volume_view.GetRenderWindow().Render()
     
     
-    def setRightVolume(self):
+    def setRightVolume(self, activated):
         print("Setting right volume...")
         print("NOT IMPLEMENTED")
 
@@ -151,6 +231,8 @@ class CropModule(QWidget):
 
     
     def resetViews(self):
+        self.button_set_left.setEnabled(False)
+        self.button_set_right.setEnabled(False)
         self.volume_view.renderer.RemoveActor(self.box_left_actor)
         self.volume_view.renderer.RemoveActor(self.cut_left_actor)
         self.slice_view.renderer.RemoveActor(self.cut_left_actor)
@@ -178,6 +260,11 @@ class CropModule(QWidget):
         ox, oy, oz = self.image.GetOrigin()
         self.image.SetOrigin(-ox, -oy, oz)
 
+        # compute crop volume size around a center
+        # needs to be 1/4 of target dimension (120 144 248)
+        sx, sy, sz = self.image.GetSpacing()
+        self.crop_volume_size = (30*sx, 36*sy, 62*sz)
+
         # set the volume image in both views
         self.volume_view.setImage(self.image)
         self.slice_view.setImage(self.image)
@@ -192,6 +279,10 @@ class CropModule(QWidget):
         right_volume_file = patient_dict['volume_right']
         self.__loadCropVolume(left_volume_file, self.box_left_source, self.box_left_actor, self.cut_left_actor)
         self.__loadCropVolume(right_volume_file, self.box_right_source, self.box_right_actor, self.cut_right_actor)
+
+        # enable edit options
+        self.button_set_left.setEnabled(True)
+        self.button_set_right.setEnabled(True)
 
 
     def close(self):

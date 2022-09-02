@@ -135,6 +135,10 @@ class CarotidAnalyzer(QMainWindow, Ui_MainWindow):
             add_if_exists("centerlines_right", "_right_lumen_centerlines.vtp", True)
             self.patient_data.append(patient_dict)
 
+            entry_volume_raw = ["Full Volume", "", ""]
+            entry_volume_raw[1] = SYM_YES if patient_dict["volume_raw"] else SYM_NO
+            entry_volume_raw[2] = entry_volume_raw[1]
+
             entry_volume = ["Crop Volume", "", ""]
             entry_volume[1] = SYM_YES if patient_dict["volume_left"] else SYM_NO
             entry_volume[2] = SYM_YES if patient_dict["volume_right"] else SYM_NO
@@ -156,6 +160,7 @@ class CarotidAnalyzer(QMainWindow, Ui_MainWindow):
             entry_centerlines[2] = SYM_YES if patient_dict["centerlines_right"] else SYM_NO
 
             entry_patient = QTreeWidgetItem([pID, "", ""])
+            entry_patient.addChild(QTreeWidgetItem(entry_volume_raw))
             entry_patient.addChild(QTreeWidgetItem(entry_volume))
             entry_patient.addChild(QTreeWidgetItem(entry_seg))
             entry_patient.addChild(QTreeWidgetItem(entry_lumen))
@@ -166,6 +171,9 @@ class CarotidAnalyzer(QMainWindow, Ui_MainWindow):
         self.tree_widget_data.resizeColumnToContents(0)
         self.tree_widget_data.resizeColumnToContents(1)
         self.tree_widget_data.resizeColumnToContents(2)
+
+        for i in range(self.tree_widget_data.topLevelItemCount()):
+            self.tree_widget_data.topLevelItem(i).setExpanded(False)
         
     
     def openWorkingDirDialog(self):
