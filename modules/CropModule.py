@@ -134,23 +134,38 @@ class CropModule(QWidget):
         self.volume_view.GetRenderWindow().Render()
 
 
+    def __activateHoverVolume(self, color, fin_func):
+        self.box_selection_actor.GetProperty().SetColor(color)
+        self.slice_view.renderer.AddActor(self.box_selection_actor)
+        self.volume_view.renderer.AddActor(self.box_selection_actor)
+        self.mouse_move_observer = self.slice_view.interactor_style.AddObserver("MouseMoveEvent", self.pickWorldPosition)
+        self.left_click_observer = self.slice_view.interactor_style.AddObserver("LeftButtonPressEvent", fin_func)
+
+
+    def __disableHoverVolume(self):
+        self.slice_view.interactor_style.RemoveObserver(self.mouse_move_observer)
+        self.slice_view.interactor_style.RemoveObserver(self.left_click_observer)
+        self.slice_view.renderer.RemoveActor(self.box_selection_actor)
+        self.volume_view.renderer.RemoveActor(self.box_selection_actor)
+        self.slice_view.GetRenderWindow().Render()
+        self.volume_view.GetRenderWindow().Render()
+
+
     def setLeftVolume(self, activated):
         if activated:
-            self.box_selection_actor.GetProperty().SetColor(COLOR_LEFT_LIGHT)
-            self.slice_view.renderer.AddActor(self.box_selection_actor)
-            self.volume_view.renderer.AddActor(self.box_selection_actor)
-            self.mouse_move_observer = self.slice_view.interactor_style.AddObserver("MouseMoveEvent", self.pickWorldPosition)
-            self.left_click_observer = self.slice_view.interactor_style.AddObserver("LeftButtonPressEvent", self.setLeftVolumeFinished)
+            self.__activateHoverVolume(COLOR_LEFT_LIGHT, self.setLeftVolumeFinished)
         else:
-            self.slice_view.interactor_style.RemoveObserver(self.mouse_move_observer)
-            self.slice_view.interactor_style.RemoveObserver(self.left_click_observer)
-            self.slice_view.renderer.RemoveActor(self.box_selection_actor)
-            self.volume_view.renderer.RemoveActor(self.box_selection_actor)
-            self.slice_view.GetRenderWindow().Render()
-            self.volume_view.GetRenderWindow().Render()
+            self.__disableHoverVolume()
+
+
+    def setRightVolume(self, activated):
+        if activated:
+            self.__activateHoverVolume(COLOR_RIGHT_LIGHT, self.setRightVolumeFinished)
+        else:
+            self.__disableHoverVolume()
 
     
-    def setLeftVolumeFinished(self, obj, event):
+    def __setVolumeFinished(self, crop_image, box_source, box_actor, cut_actor):
         # pick current mouse position, screen coordinates
         x_view, y_view = self.slice_view.GetEventPosition()  
 
@@ -165,25 +180,55 @@ class CropModule(QWidget):
                  int(round((pos[1] - origin[1]) / spacing[1])), 
                  int(self.slice_view.slice))
 
-        # set crop volume
-        print("Crop volume around center ", x, ", ", y, ", ", z)
-        # TODO crop volume: center +- 30, 36, 62
-        # TODO sinc filter scale resolution * 2
-        # TODO emit data modified
+        # crop volume around center +- 30, 36, 62
+        extractor = vtk.vtkExtractVOI()
+        extractor.SetInputData(self.image)
+        extractor.SetVOI(x-29, x+30, y-35, y+36, z-61, z+62)
+        
+        # scale resolution * 2
+        reslicer = vtk.vtkImageReslice()
+        reslicer.SetInputConnection(extractor.GetOutputPort())
+        reslicer.SetInterpolationModeToCubic()
+        reslicer.SetOutputExtent(0, 120, 0, 144, 0, 248)
+        reslicer.SetOutputSpacing([s*0.5 for s in spacing])
+        reslicer.Update()
+
+        # output crop image
+        crop_image = reslicer.GetOutput()
+        crop_image.SetOrigin(origin[0] + spacing[0] * (x-29),
+                             origin[1] + spacing[1] * (y-35),
+                             origin[2] + spacing[2] * (z-61))
+
+        # adapt crop display
+        ox, oy, oz = crop_image.GetOrigin()
+        sx, sy, sz = crop_image.GetSpacing()
+        x, y, z = crop_image.GetDimensions()
+        box_source.SetBounds(ox, ox + sx*x,
+                             oy, oy + sy*y,
+                             oz, oz + sz*z)
+        self.volume_view.renderer.AddActor(box_actor)
+        self.volume_view.renderer.AddActor(cut_actor)
+        self.slice_view.renderer.AddActor(cut_actor)
 
         # reset observers and scene
-        self.button_set_left.setChecked(False)
         self.slice_view.interactor_style.RemoveObserver(self.mouse_move_observer)
         self.slice_view.interactor_style.RemoveObserver(self.left_click_observer)
         self.slice_view.renderer.RemoveActor(self.box_selection_actor)
         self.volume_view.renderer.RemoveActor(self.box_selection_actor)
         self.slice_view.GetRenderWindow().Render()
         self.volume_view.GetRenderWindow().Render()
-    
-    
-    def setRightVolume(self, activated):
-        print("Setting right volume...")
-        print("NOT IMPLEMENTED")
+        
+        # TODO emit data modified
+
+
+    def setLeftVolumeFinished(self, obj, event):
+        self.__setVolumeFinished(self.crop_image_left, self.box_left_source, self.box_left_actor, self.cut_left_actor)
+        self.button_set_left.setChecked(False)
+
+
+    def setRightVolumeFinished(self, obj, event):
+        self.__setVolumeFinished(self.crop_image_right, self.box_right_source, self.box_right_actor, self.cut_right_actor)
+        self.button_set_right.setChecked(False)  
 
 
     def showEvent(self, event):
@@ -222,7 +267,6 @@ class CropModule(QWidget):
                          )
             self.volume_view.renderer.AddActor(box_actor)
             self.volume_view.renderer.AddActor(cut_actor)
-            self.volume_view.renderer.ResetCamera()
             self.slice_view.renderer.AddActor(cut_actor)
         else:
             self.volume_view.renderer.RemoveActor(box_actor)
