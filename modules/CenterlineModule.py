@@ -172,11 +172,14 @@ class CenterlineModule(QTabWidget):
         self.setTabText(1, "Left")
         self.new_centerlines.emit()
 
+
     def dataModifiedRight(self):
         self.setTabText(0, "Right " + SYM_UNSAVED_CHANGES)
 
+
     def dataModifiedLeft(self):
         self.setTabText(1, "Left " + SYM_UNSAVED_CHANGES)
+    
     
     def discard(self):
         self.loadPatient(self.patient_dict)

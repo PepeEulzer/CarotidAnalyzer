@@ -170,7 +170,6 @@ class SegmentationModuleTab(QWidget):
         self.picker = vtk.vtkPropPicker()
         
 
-
     def sliceChanged(self, slice_nr):
         self.slice_view_slider.setSliderPosition(slice_nr)
         self.mask_slice_mapper.SetSliceNumber(slice_nr)
