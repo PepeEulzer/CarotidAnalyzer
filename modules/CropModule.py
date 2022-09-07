@@ -4,10 +4,9 @@ from collections import OrderedDict
 import numpy as np
 import nrrd
 import vtk
-from vtk.util.numpy_support import vtk_to_numpy
+from vtk.util.numpy_support import vtk_to_numpy, numpy_to_vtk
 from PyQt5.QtCore import Qt, pyqtSignal
 from PyQt5.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QSlider, QPushButton
-from vmtk import vmtkscripts
 
 from defaults import *
 from modules.Interactors import ImageSliceInteractor, VolumeRenderingInteractor
@@ -261,36 +260,24 @@ class CropModule(QWidget):
         super(CropModule, self).hideEvent(event)
 
 
-    def __loadCropVolume(self, filename, box_source, box_actor, cut_actor):
+    def __loadCropVolumeBox(self, filename, box_source, box_actor, cut_actor):
         if filename:
-            reader = vmtkscripts.vmtkImageReader()
-            reader.InputFileName = filename
-            reader.Execute()
-            img = reader.Image
-
-            # In the nrrd header, the origin x,y and spacing x,y may be mirrored.
-            # Might be an artifact of the LPS coordinate system?
-            # => Box x,y axes need to be flipped.
-            ox, oy, oz = img.GetOrigin()
-            ox *= -1
-            oy *= -1
-            sx, sy, sz = img.GetSpacing()
-            sx = abs(sx)
-            sy = abs(sy)
-
-            x, y, z = img.GetDimensions()
-            # if sx < 0: # mirrored
-            #     print("mirrored")
-            #     box_source.SetBounds(
-            #             -ox - sx * x, -ox,
-            #             -oy - sy * y, -oy,  
-            #              oz,  oz + sz * z
-            #     )
-            box_source.SetBounds(
-                         ox, ox + sx*x,
-                         oy, oy + sy*y,
+            header = nrrd.read_header(filename)
+            ox, oy, oz = header['space origin']
+            sx, sy, sz = np.diagonal(header['space directions'])
+            x, y, z = header['sizes']
+            if sx < 0: # mirrored x/y axes
+                box_source.SetBounds(
+                         ox + sx*x, ox,
+                         oy + sy*y, oy,
                          oz, oz + sz*z
-            )
+                )
+            else:
+                box_source.SetBounds(
+                            ox, ox + sx*x,
+                            oy, oy + sy*y,
+                            oz, oz + sz*z
+                )
             self.volume_view.renderer.AddActor(box_actor)
             self.volume_view.renderer.AddActor(cut_actor)
             self.slice_view.renderer.AddActor(cut_actor)
@@ -320,20 +307,17 @@ class CropModule(QWidget):
             self.resetViews()
             return
 
-        # load raw volume
-        reader = vmtkscripts.vmtkImageReader()
-        reader.InputFileName = patient_dict['volume_raw']
-        reader.Execute()
-        self.image = reader.Image
-
-        # In the nrrd header, the origin x,y are mirrored.
-        # => Flip x,y origin positions.
-        ox, oy, oz = self.image.GetOrigin()
-        self.image.SetOrigin(-ox, -oy, oz)
+        img_data, header = nrrd.read(patient_dict['volume_raw'])
+        self.image = vtk.vtkImageData()
+        self.image.SetDimensions(header['sizes'])
+        sx, sy, sz = np.diagonal(header['space directions'])
+        self.image.SetSpacing(sx, sy, sz)
+        self.image.SetOrigin(header['space origin'])
+        vtk_data_array = numpy_to_vtk(img_data.ravel(order='F'))
+        self.image.GetPointData().SetScalars(vtk_data_array)
 
         # compute crop volume size around a center
         # needs to be 1/4 of target dimension (120 144 248)
-        sx, sy, sz = self.image.GetSpacing()
         self.crop_volume_size = (30*sx, 36*sy, 62*sz)
 
         # set the volume image in both views
@@ -346,8 +330,8 @@ class CropModule(QWidget):
         self.slice_view_slider.setSliderPosition(self.slice_view.slice)
 
         # load crop volume boxes if they exist
-        self.__loadCropVolume(self.patient_dict['volume_left'], self.box_left_source, self.box_left_actor, self.cut_left_actor)
-        self.__loadCropVolume(self.patient_dict['volume_right'], self.box_right_source, self.box_right_actor, self.cut_right_actor)
+        self.__loadCropVolumeBox(self.patient_dict['volume_left'], self.box_left_source, self.box_left_actor, self.cut_left_actor)
+        self.__loadCropVolumeBox(self.patient_dict['volume_right'], self.box_right_source, self.box_right_actor, self.cut_right_actor)
 
         # enable edit options
         self.button_set_left.setEnabled(True)
@@ -361,11 +345,11 @@ class CropModule(QWidget):
         header = OrderedDict()
         header['dimension'] = 3
         header['space'] = 'left-posterior-superior'
-        header['space directions'] = [[-sx, 0, 0], [0, -sy, 0], [0, 0, sz]]
+        header['space directions'] = [[sx, 0, 0], [0, sy, 0], [0, 0, sz]]
         header['kinds'] = ['domain', 'domain', 'domain']
         header['endian'] = 'little'
         header['encoding'] = 'gzip'
-        header['space origin'] = [-ox, -oy, oz]
+        header['space origin'] = [ox, oy, oz]
         segmentation = vtk_to_numpy(volume.GetPointData().GetScalars()).astype(np.int16)
         segmentation = segmentation.reshape(x_dim, y_dim, z_dim, order='F')
         nrrd.write(path, segmentation, header)
@@ -391,8 +375,8 @@ class CropModule(QWidget):
     def discard(self):
         self.crop_image_left = None
         self.crop_image_right = None
-        self.__loadCropVolume(self.patient_dict['volume_left'], self.box_left_source, self.box_left_actor, self.cut_left_actor)
-        self.__loadCropVolume(self.patient_dict['volume_right'], self.box_right_source, self.box_right_actor, self.cut_right_actor)
+        self.__loadCropVolumeBox(self.patient_dict['volume_left'], self.box_left_source, self.box_left_actor, self.cut_left_actor)
+        self.__loadCropVolumeBox(self.patient_dict['volume_right'], self.box_right_source, self.box_right_actor, self.cut_right_actor)
         self.slice_view.GetRenderWindow().Render()
         self.volume_view.GetRenderWindow().Render()
 

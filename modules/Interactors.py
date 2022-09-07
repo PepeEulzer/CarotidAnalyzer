@@ -1,7 +1,9 @@
 import os
 
 import numpy as np
+import nrrd
 import vtk
+from vtk.util.numpy_support import numpy_to_vtk
 from PyQt5.QtCore import pyqtSignal
 from vtk.qt.QVTKRenderWindowInteractor import QVTKRenderWindowInteractor
 from vmtk import vmtkscripts
@@ -72,10 +74,19 @@ class ImageSliceInteractor(QVTKRenderWindowInteractor):
 
 
     def loadNrrd(self, path, flip_x_y=False):
-        reader = vmtkscripts.vmtkImageReader()
-        reader.InputFileName = path
-        reader.Execute()
-        image = reader.Image
+        # reader = vmtkscripts.vmtkImageReader()
+        # reader.InputFileName = path
+        # reader.Execute()
+        # image = reader.Image
+
+        img_data, header = nrrd.read(path)
+        image = vtk.vtkImageData()
+        image.SetDimensions(header['sizes'])
+        image.SetSpacing(np.diagonal(header['space directions']))
+        image.SetOrigin(header['space origin'])
+        vtk_data_array = numpy_to_vtk(img_data.ravel(order='F'))
+        image.GetPointData().SetScalars(vtk_data_array)
+
         if flip_x_y:
             sx, sy, sz = image.GetSpacing()
             ox, oy, oz = image.GetOrigin()
