@@ -56,10 +56,8 @@ class SegmentationModuleTab(QWidget):
         self.brush_size_slider.setVisible(False)
         self.brush_slider_label.setVisible(False)
         self.slice_view = ImageSliceInteractor(self)
-        self.slice_view.renderer.GetActiveCamera().SetViewUp(0, 1, 0)
         self.slice_view_slider = QSlider(Qt.Horizontal)
         self.model_view = IsosurfaceInteractor(self)
-        self.model_view.renderer.GetActiveCamera().SetViewUp(0, 1, 0)
 
         # add everything to a layout
         self.slice_view_layout = QVBoxLayout()
@@ -415,22 +413,26 @@ class SegmentationModuleTab(QWidget):
 
     def saveChanges(self, path_seg, path_lumen, path_plaque):
         # catch if one side has something to save, other side not
+        if self.label_map is None:
+            return
+
         x_dim, y_dim, z_dim = self.label_map.GetDimensions()
         if x_dim == 0 or y_dim == 0 or z_dim == 0:
             return
 
-        # save segmentation nrrd (geometry based on image volume)
-        header_img = nrrd.read_header(self.volume_file)
+        # save segmentation nrrd
+        sx, sy, sz = self.label_map.GetSpacing()
+        ox, oy, oz = self.label_map.GetOrigin()
         header = OrderedDict()
         header['type'] = 'unsigned char'
         header['dimension'] = 3
         header['space'] = 'left-posterior-superior'
         header['sizes'] = '120 144 248' # fixed model size
-        header['space directions'] = header_img['space directions']
+        header['space directions'] = [[sx, 0, 0], [0, sy, 0], [0, 0, sz]]
         header['kinds'] = ['domain', 'domain', 'domain']
         header['endian'] = 'little'
         header['encoding'] = 'gzip'
-        header['space origin'] = header_img['space origin']
+        header['space origin'] = [ox, oy, oz]
         header['Segment0_ID'] = 'Segment_1'
         header['Segment0_Name'] = 'plaque'
         header['Segment0_Color'] = str(241/255) + ' ' + str(214/255) + ' ' + str(145/255)

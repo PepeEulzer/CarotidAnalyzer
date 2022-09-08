@@ -73,12 +73,7 @@ class ImageSliceInteractor(QVTKRenderWindowInteractor):
             self.slice_changed.emit(self.slice)
 
 
-    def loadNrrd(self, path, flip_x_y=False):
-        # reader = vmtkscripts.vmtkImageReader()
-        # reader.InputFileName = path
-        # reader.Execute()
-        # image = reader.Image
-
+    def loadNrrd(self, path):
         img_data, header = nrrd.read(path)
         image = vtk.vtkImageData()
         image.SetDimensions(header['sizes'])
@@ -87,11 +82,6 @@ class ImageSliceInteractor(QVTKRenderWindowInteractor):
         vtk_data_array = numpy_to_vtk(img_data.ravel(order='F'))
         image.GetPointData().SetScalars(vtk_data_array)
 
-        if flip_x_y:
-            sx, sy, sz = image.GetSpacing()
-            ox, oy, oz = image.GetOrigin()
-            image.SetSpacing(-sx, -sy, sz)
-            image.SetOrigin(-ox, -oy, oz)
         self.image_mapper.SetInputData(image)
         self.min_slice = self.image_mapper.GetSliceNumberMinValue()
         self.max_slice = self.image_mapper.GetSliceNumberMaxValue()
@@ -192,38 +182,36 @@ class IsosurfaceInteractor(QVTKRenderWindowInteractor):
 
 
     def loadNrrd(self, path, src_image=None):
-        # read the file
-        reader = vmtkscripts.vmtkImageReader()
-        reader.InputFileName = path
-        reader.Execute()
+        img_data, header = nrrd.read(path)
+        label_map = vtk.vtkImageData()
+        label_map.SetDimensions(header['sizes'])
+        label_map.SetSpacing(np.diagonal(header['space directions']))
+        label_map.SetOrigin(header['space origin'])
+        vtk_data_array = numpy_to_vtk(img_data.ravel(order='F'))
+        label_map.GetPointData().SetScalars(vtk_data_array)
+
 
         # Set the extent of the labelmap to the fixed model size (120, 144, 248).
         # Uses the source image (CTA volume) to position the labelmap.
         # Assumes the labelmap extent and origin to be within the source image.
-        if src_image is not None:
-            label_origin = reader.Image.GetOrigin()
-            src_origin = src_image.GetOrigin()
-            src_spacing = src_image.GetSpacing()
-            x_offset = int(abs(round((src_origin[0] - label_origin[0]) / src_spacing[0])))
-            y_offset = int(abs(round((src_origin[1] - label_origin[1]) / src_spacing[1])))
-            z_offset = int(abs(round((src_origin[2] - label_origin[2]) / src_spacing[2])))
-            extent = np.array([-x_offset, 119-x_offset, -y_offset, 143-y_offset, -z_offset, 247-z_offset])
-            pad = vtk.vtkImageConstantPad()
-            pad.SetConstant(0)
-            pad.SetInputData(reader.Image)
-            pad.SetOutputWholeExtent(extent)
-            pad.Update()
-            label_map = pad.GetOutput()
-            label_map.SetOrigin(src_origin)
-            label_map.SetExtent(0, 119, 0, 143, 0, 247)
-        else:
-            label_map = reader.Image
-        
-        
-        # convert to check if plaque actor is necessary
-        img_to_numpy = vmtkscripts.vmtkImageToNumpy()
-        img_to_numpy.Image = label_map
-        img_to_numpy.Execute()
+        # if src_image is not None:
+        #     label_origin = reader.Image.GetOrigin()
+        #     src_origin = src_image.GetOrigin()
+        #     src_spacing = src_image.GetSpacing()
+        #     x_offset = int(abs(round((src_origin[0] - label_origin[0]) / src_spacing[0])))
+        #     y_offset = int(abs(round((src_origin[1] - label_origin[1]) / src_spacing[1])))
+        #     z_offset = int(abs(round((src_origin[2] - label_origin[2]) / src_spacing[2])))
+        #     extent = np.array([-x_offset, 119-x_offset, -y_offset, 143-y_offset, -z_offset, 247-z_offset])
+        #     pad = vtk.vtkImageConstantPad()
+        #     pad.SetConstant(0)
+        #     pad.SetInputData(reader.Image)
+        #     pad.SetOutputWholeExtent(extent)
+        #     pad.Update()
+        #     label_map = pad.GetOutput()
+        #     label_map.SetOrigin(src_origin)
+        #     label_map.SetExtent(0, 119, 0, 143, 0, 247)
+        # else:
+        #     label_map = reader.Image
         
         # add padding
         extent = np.array(label_map.GetExtent())
@@ -233,7 +221,7 @@ class IsosurfaceInteractor(QVTKRenderWindowInteractor):
         
         # update the scene (pipeline triggers automatically)
         self.renderer.AddActor(self.actor_lumen)
-        if 1.0 in img_to_numpy.ArrayDict['PointData']['ImageScalars']:
+        if 1.0 in img_data:
             self.renderer.AddActor(self.actor_plaque)
         else:
             self.renderer.RemoveActor(self.actor_plaque)
