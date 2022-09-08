@@ -131,7 +131,6 @@ class IsosurfaceInteractor(QVTKRenderWindowInteractor):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.SetInteractorStyle(vtk.vtkInteractorStyleTrackballCamera())
-        # self.label_map = vtk.vtkImageData()
 
         # build isosurface, mapper, actor pipeline
         self.padding = vtk.vtkImageConstantPad()
@@ -190,28 +189,24 @@ class IsosurfaceInteractor(QVTKRenderWindowInteractor):
         vtk_data_array = numpy_to_vtk(img_data.ravel(order='F'))
         label_map.GetPointData().SetScalars(vtk_data_array)
 
-
-        # Set the extent of the labelmap to the fixed model size (120, 144, 248).
+        # Set the extent of the labelmap to match the source image.
         # Uses the source image (CTA volume) to position the labelmap.
-        # Assumes the labelmap extent and origin to be within the source image.
-        # if src_image is not None:
-        #     label_origin = reader.Image.GetOrigin()
-        #     src_origin = src_image.GetOrigin()
-        #     src_spacing = src_image.GetSpacing()
-        #     x_offset = int(abs(round((src_origin[0] - label_origin[0]) / src_spacing[0])))
-        #     y_offset = int(abs(round((src_origin[1] - label_origin[1]) / src_spacing[1])))
-        #     z_offset = int(abs(round((src_origin[2] - label_origin[2]) / src_spacing[2])))
-        #     extent = np.array([-x_offset, 119-x_offset, -y_offset, 143-y_offset, -z_offset, 247-z_offset])
-        #     pad = vtk.vtkImageConstantPad()
-        #     pad.SetConstant(0)
-        #     pad.SetInputData(reader.Image)
-        #     pad.SetOutputWholeExtent(extent)
-        #     pad.Update()
-        #     label_map = pad.GetOutput()
-        #     label_map.SetOrigin(src_origin)
-        #     label_map.SetExtent(0, 119, 0, 143, 0, 247)
-        # else:
-        #     label_map = reader.Image
+        if src_image is not None:
+            label_origin = header['space origin']
+            src_origin = src_image.GetOrigin()
+            src_spacing = src_image.GetSpacing()
+            x_offset = int(round((label_origin[0] - src_origin[0]) / src_spacing[0]))
+            y_offset = int(round((label_origin[1] - src_origin[1]) / src_spacing[1]))
+            z_offset = int(round((label_origin[2] - src_origin[2]) / src_spacing[2]))
+            extent = np.array(src_image.GetExtent()) - np.array([x_offset, x_offset, y_offset, y_offset, z_offset, z_offset])
+            pad = vtk.vtkImageConstantPad()
+            pad.SetConstant(0)
+            pad.SetInputData(label_map)
+            pad.SetOutputWholeExtent(extent)
+            pad.Update()
+            label_map = pad.GetOutput()
+            label_map.SetOrigin(src_origin)
+            label_map.SetExtent(src_image.GetExtent())
         
         # add padding
         extent = np.array(label_map.GetExtent())

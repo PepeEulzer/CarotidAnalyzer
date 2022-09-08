@@ -190,7 +190,7 @@ class SegmentationModuleTab(QWidget):
         self.volume_file = volume_file
         self.pred_file = pred_file
         if volume_file:
-            self.image = self.slice_view.loadNrrd(volume_file, False)
+            self.image = self.slice_view.loadNrrd(volume_file)
             self.brush_size = self.image.GetSpacing()[0]
             self.edit_button.setEnabled(True)
             self.slice_view_slider.setRange(
@@ -359,7 +359,7 @@ class SegmentationModuleTab(QWidget):
         origin = self.image.GetOrigin()
         self.imgPos = ((position[0]-origin[0])/self.image.GetSpacing()[0], 
                        (position[1]-origin[1])/self.image.GetSpacing()[1], 
-                       (position[2]+origin[2])/self.image.GetSpacing()[2])  # convert into image position
+                       self.slice_view.slice)  # convert into image position
         self.circle.SetCenter(position[0],
                               position[1],
                               self.image.GetOrigin()[2]-self.image.GetExtent()[2])  # move circle if mouse moved 
