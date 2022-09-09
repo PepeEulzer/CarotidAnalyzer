@@ -182,23 +182,59 @@ class IsosurfaceInteractor(QVTKRenderWindowInteractor):
 
     def loadNrrd(self, path, src_image=None):
         img_data, header = nrrd.read(path)
+        label_origin = header['space origin']
+        label_spacing = np.diagonal(header['space directions'])
         label_map = vtk.vtkImageData()
         label_map.SetDimensions(header['sizes'])
-        label_map.SetSpacing(np.diagonal(header['space directions']))
-        label_map.SetOrigin(header['space origin'])
+        label_map.SetSpacing(label_spacing)
+        label_map.SetOrigin(label_origin)
         vtk_data_array = numpy_to_vtk(img_data.ravel(order='F'))
         label_map.GetPointData().SetScalars(vtk_data_array)
 
         # Set the extent of the labelmap to match the source image.
         # Uses the source image (CTA volume) to position the labelmap.
         if src_image is not None:
-            label_origin = header['space origin']
             src_origin = src_image.GetOrigin()
             src_spacing = src_image.GetSpacing()
-            x_offset = int(round((label_origin[0] - src_origin[0]) / src_spacing[0]))
-            y_offset = int(round((label_origin[1] - src_origin[1]) / src_spacing[1]))
-            z_offset = int(round((label_origin[2] - src_origin[2]) / src_spacing[2]))
-            extent = np.array(src_image.GetExtent()) - np.array([x_offset, x_offset, y_offset, y_offset, z_offset, z_offset])
+
+            label_bounding_box = (
+                  np.array([label_origin[0], label_origin[0], label_origin[1], label_origin[1], label_origin[2], label_origin[2]])
+                + np.array(label_map.GetExtent())
+                * np.array([label_spacing[0], label_spacing[0], label_spacing[1], label_spacing[1], label_spacing[2], label_spacing[2]])
+            )
+
+            src_bounding_box = (
+                  np.array([src_origin[0], src_origin[0], src_origin[1], src_origin[1], src_origin[2], src_origin[2]])
+                + np.array(src_image.GetExtent())
+                * np.array([src_spacing[0], src_spacing[0], src_spacing[1], src_spacing[1], src_spacing[2], src_spacing[2]])
+            )
+
+            if np.sign(label_spacing[0]) != np.sign(src_spacing[0]):
+                # x/y axis direction mismatch -> swap x and y bounds
+                label_bounding_box[0], label_bounding_box[1] = label_bounding_box[1], label_bounding_box[0]
+                label_bounding_box[2], label_bounding_box[3] = label_bounding_box[3], label_bounding_box[2]
+
+            bounding_box_diff = src_bounding_box - label_bounding_box
+            extent_offset = np.round(bounding_box_diff / np.array([label_spacing[0], label_spacing[0], label_spacing[1], label_spacing[1], label_spacing[2], label_spacing[2]])).astype(np.int32)
+            extent = np.array(label_map.GetExtent()) + extent_offset
+
+            print("---label---")
+            print(label_bounding_box)
+            print("---src---")
+            print(src_bounding_box)
+            print("---diff---")
+            print(bounding_box_diff)
+            print("---offset---")
+            print(extent_offset)
+            print("---adapted extent---")
+            print(extent)
+
+
+
+            # x_offset = int(round((label_origin[0] - src_origin[0]) / abs(src_spacing[0])))
+            # y_offset = int(round((label_origin[1] - src_origin[1]) / abs(src_spacing[1])))
+            # z_offset = int(round((label_origin[2] - src_origin[2]) / abs(src_spacing[2])))
+            # extent = np.array(src_image.GetExtent()) - np.array([x_offset, x_offset, y_offset, y_offset, z_offset, z_offset])
             pad = vtk.vtkImageConstantPad()
             pad.SetConstant(0)
             pad.SetInputData(label_map)
@@ -215,16 +251,23 @@ class IsosurfaceInteractor(QVTKRenderWindowInteractor):
         self.padding.SetOutputWholeExtent(extent)
         
         # update the scene (pipeline triggers automatically)
-        self.renderer.AddActor(self.actor_lumen)
         if 1.0 in img_data:
             self.renderer.AddActor(self.actor_plaque)
+            plaque_pending = False
         else:
             self.renderer.RemoveActor(self.actor_plaque)
+            plaque_pending = True
+        if 2.0 in img_data:
+            self.renderer.AddActor(self.actor_lumen)
+            lumen_pending = False
+        else:
+            self.renderer.RemoveActor(self.actor_lumen)
+            lumen_pending = True
         self.renderer.ResetCamera()
         self.GetRenderWindow().Render()
 
-        # return pointer if needed
-        return label_map
+        # return pointer to label map if needed, return pending labels
+        return label_map, plaque_pending, lumen_pending
 
 
     def reset(self):

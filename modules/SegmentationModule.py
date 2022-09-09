@@ -23,13 +23,15 @@ class SegmentationModuleTab(QWidget):
         super().__init__(parent)
 
         # state
-        self.image = None           # underlying CTA volume image
-        self.label_map = None       # segmentation label map
-        self.label_map_data = None  # numpy array of raw label map scalar data
-        self.volume_file = False    # path to CTA volume file
-        self.pred_file = False      # path to CNN segmentation prediction file
-        self.editing_active = False # whether label map editing is active
-        self.brush_size = 0         # size of brush on label map
+        self.image = None                # underlying CTA volume image
+        self.label_map = None            # segmentation label map
+        self.label_map_data = None       # numpy array of raw label map scalar data
+        self.plaque_pending = True       # True if no plaque pixels exist yet
+        self.lumen_pending = True        # True is not lumen pixels exist yet
+        self.model_camera_pending = True # True if camera of model_view has not been set yet
+        self.pred_file = False           # path to CNN segmentation prediction file
+        self.editing_active = False      # whether label map editing is active
+        self.brush_size = 0              # size of brush on label map
         
         # on-screen objects
         self.CNN_button = QPushButton("New Segmentation: Initialize with CNN")
@@ -187,11 +189,12 @@ class SegmentationModuleTab(QWidget):
     
 
     def loadVolumeSeg(self, volume_file, seg_file, pred_file):
-        self.volume_file = volume_file
         self.pred_file = pred_file
+
+        # load image volume
         if volume_file:
             self.image = self.slice_view.loadNrrd(volume_file)
-            self.brush_size = self.image.GetSpacing()[0]
+            self.brush_size = abs(self.image.GetSpacing()[0])
             self.edit_button.setEnabled(True)
             self.slice_view_slider.setRange(
                 self.slice_view.min_slice,
@@ -199,28 +202,51 @@ class SegmentationModuleTab(QWidget):
             )
             self.slice_view_slider.setSliderPosition(self.slice_view.slice)
 
-        else:
-            self.slice_view.reset()
-            self.image = None
-        
-        if seg_file:
-            self.label_map = self.model_view.loadNrrd(seg_file, self.image)
-            self.__loadLabelMapData()
-            self.model_view.renderer.AddActor(self.lumen_outline_actor3D)
-            self.model_view.renderer.AddActor(self.plaque_outline_actor3D)
-            if not self.editing_active:
-                self.slice_view.renderer.AddActor(self.lumen_outline_actor2D)
-                self.slice_view.renderer.AddActor(self.plaque_outline_actor2D)
+            # image exists -> load segmentation
+            if seg_file:
+                self.label_map, self.plaque_pending, self.lumen_pending = self.model_view.loadNrrd(seg_file, self.image)
+                self.__loadLabelMapData()
+                self.model_camera_pending = False
+                self.model_view.renderer.AddActor(self.lumen_outline_actor3D)
+                self.model_view.renderer.AddActor(self.plaque_outline_actor3D)
+                if not self.editing_active:
+                    self.slice_view.renderer.AddActor(self.lumen_outline_actor2D)
+                    self.slice_view.renderer.AddActor(self.plaque_outline_actor2D)
+            
+            # image exists -> create empty segmentation
+            else:
+                self.plaque_pending = True
+                self.lumen_pending = True
+                self.model_camera_pending = True
+                self.model_view.reset()
+                self.label_map = vtk.vtkImageData()
+                self.label_map.SetDimensions(self.image.GetDimensions())
+                self.label_map.SetSpacing(self.image.GetSpacing())
+                self.label_map.SetOrigin(self.image.GetOrigin())
+                self.label_map_data = np.zeros(self.label_map.GetDimensions(), dtype=np.uint8)
+                vtk_data_array = numpy_to_vtk(self.label_map_data.ravel(order='F'))
+                self.label_map.GetPointData().SetScalars(vtk_data_array)
+                self.masks_color_mapped.SetInputData(self.label_map)
+
+            # draw scene
             self.slice_view.GetRenderWindow().Render()
             self.model_view.GetRenderWindow().Render()
+
+        # no image -> reset
         else:
+            self.plaque_pending = True
+            self.lumen_pending = True
+            self.model_camera_pending = True
+            self.image = None
             self.label_map = None
+            self.label_map_data = None
+            self.deactivateEditing()
+            self.edit_button.setEnabled(False)
             self.model_view.renderer.RemoveActor(self.lumen_outline_actor3D)
             self.slice_view.renderer.RemoveActor(self.lumen_outline_actor2D)
             self.model_view.renderer.RemoveActor(self.plaque_outline_actor3D)
             self.slice_view.renderer.RemoveActor(self.plaque_outline_actor2D)
-            self.slice_view.GetRenderWindow().Render()
-            self.model_view.GetRenderWindow().Render()
+            self.slice_view.reset()
             self.model_view.reset()
 
 
@@ -236,8 +262,9 @@ class SegmentationModuleTab(QWidget):
             dlg.setStandardButtons(QMessageBox.Ok | QMessageBox.Cancel)
             button = dlg.exec()
             if button == QMessageBox.Ok:
-                self.model_view.loadNrrd(self.pred_file)
+                self.label_map, self.plaque_pending, self.lumen_pending = self.model_view.loadNrrd(self.pred_file)
                 self.__loadLabelMapData()
+                self.model_camera_pending = False
                 self.model_view.renderer.AddActor(self.lumen_outline_actor3D)
                 self.model_view.renderer.AddActor(self.plaque_outline_actor3D)
                 if not self.editing_active:
@@ -302,8 +329,9 @@ class SegmentationModuleTab(QWidget):
 
     def brushSizeChanged(self, brush_size):
         # change size of drawing on label map
-        self.brush_size = int(round(brush_size*self.image.GetSpacing()[0]))
-        self.circle.SetRadius(self.brush_size*self.image.GetSpacing()[0])
+        x_spacing = abs(self.image.GetSpacing()[0]) # can be negative
+        self.brush_size = int(round(brush_size * x_spacing))
+        self.circle.SetRadius(self.brush_size * x_spacing)
 
         # create circle mask
         axis = np.arange(-self.brush_size, self.brush_size+1, 1)
@@ -367,7 +395,15 @@ class SegmentationModuleTab(QWidget):
 
 
     def start_draw(self, obj, event):
-        # draw first point at position clicked on 
+        # check if pipeline needs updates
+        if self.plaque_pending and self.draw_value == 1.0:
+            self.model_view.renderer.AddActor(self.model_view.actor_plaque)
+            self.plaque_pending = False
+        elif self.lumen_pending and self.draw_value == 2.0:
+            self.model_view.renderer.AddActor(self.model_view.actor_lumen)
+            self.lumen_pending = False
+
+        # draw first point at position clicked on
         self.draw(obj,event)
         self.data_modified.emit()
 
@@ -394,7 +430,7 @@ class SegmentationModuleTab(QWidget):
         y1 = min(y+s+1, self.label_map_data.shape[1])
         mask = self.circle_mask[x0-x+s:x1-x+s, y0-y+s:y1-y+s] # crop circle mask at borders
         self.label_map_data[x0:x1,y0:y1,z][mask] = self.draw_value
-        
+
         # update the label map (shallow copies make this efficient)
         vtk_data_array = numpy_to_vtk(self.label_map_data.ravel(order='F'))
         self.label_map.GetPointData().SetScalars(vtk_data_array)
@@ -409,6 +445,10 @@ class SegmentationModuleTab(QWidget):
         # update 3D display
         self.model_view.padding.SetInputData(self.label_map)
         self.model_view.GetRenderWindow().Render()
+        if self.model_camera_pending == True:
+            self.model_view.renderer.ResetCamera()
+            self.model_view.GetRenderWindow().Render()
+            self.model_camera_pending = False
 
 
     def saveChanges(self, path_seg, path_lumen, path_plaque):
