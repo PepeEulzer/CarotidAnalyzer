@@ -1,3 +1,4 @@
+from cProfile import label
 import os
 
 import numpy as np
@@ -6,7 +7,6 @@ import vtk
 from vtk.util.numpy_support import numpy_to_vtk
 from PyQt5.QtCore import pyqtSignal
 from vtk.qt.QVTKRenderWindowInteractor import QVTKRenderWindowInteractor
-from vmtk import vmtkscripts
 
 from defaults import *
 
@@ -183,9 +183,33 @@ class IsosurfaceInteractor(QVTKRenderWindowInteractor):
     def loadNrrd(self, path, src_image=None):
         img_data, header = nrrd.read(path)
         label_origin = header['space origin']
-        label_spacing = np.diagonal(header['space directions'])
+        label_spacing = np.copy(np.diagonal(header['space directions']))
+        label_dim = header['sizes']
+
+        # if label_spacing[0] < 0:
+        #     label_origin[0] += (label_dim[0]-1) * label_spacing[0]
+        #     label_spacing[0] *= -1
+        #     img_data = img_data[::-1,::,::]
+
+        # if label_spacing[1] < 0:
+        #     label_origin[1] += (label_dim[1]-1) * label_spacing[1]
+        #     label_spacing[1] *= -1
+        #     img_data = img_data[::,::-1,::]
+
+        if src_image is not None:
+            src_origin = np.array(src_image.GetOrigin())
+            src_spacing = np.array(src_image.GetSpacing())
+            src_dim = np.array(src_image.GetDimensions())
+
+            # case 1: x/y axis directions match
+            if np.sign(label_spacing[0]) == np.sign(src_spacing[0]):
+                # vector from source to label origin in pixels
+                src_to_label_origin = (label_origin - src_origin) / np.abs(src_spacing)
+                img_raw = np.zeros(src_dim, dtype=np.uint8)
+                
+
         label_map = vtk.vtkImageData()
-        label_map.SetDimensions(header['sizes'])
+        label_map.SetDimensions(label_dim)
         label_map.SetSpacing(label_spacing)
         label_map.SetOrigin(label_origin)
         vtk_data_array = numpy_to_vtk(img_data.ravel(order='F'))
@@ -193,26 +217,35 @@ class IsosurfaceInteractor(QVTKRenderWindowInteractor):
 
         # Set the extent of the labelmap to match the source image.
         # Uses the source image (CTA volume) to position the labelmap.
-        if src_image is not None:
+        if False:#src_image is not None:
             src_origin = src_image.GetOrigin()
             src_spacing = src_image.GetSpacing()
+            src_dim = src_image.GetDimensions()
+            
 
             label_bounding_box = (
                   np.array([label_origin[0], label_origin[0], label_origin[1], label_origin[1], label_origin[2], label_origin[2]])
-                + np.array(label_map.GetExtent())
+                + np.array([0, label_dim[0], 0, label_dim[1], 0, label_dim[2]])
                 * np.array([label_spacing[0], label_spacing[0], label_spacing[1], label_spacing[1], label_spacing[2], label_spacing[2]])
             )
 
             src_bounding_box = (
                   np.array([src_origin[0], src_origin[0], src_origin[1], src_origin[1], src_origin[2], src_origin[2]])
-                + np.array(src_image.GetExtent())
+                + np.array([0, src_dim[0], 0, src_dim[1], 0, src_dim[2]])
                 * np.array([src_spacing[0], src_spacing[0], src_spacing[1], src_spacing[1], src_spacing[2], src_spacing[2]])
             )
 
-            if np.sign(label_spacing[0]) != np.sign(src_spacing[0]):
-                # x/y axis direction mismatch -> swap x and y bounds
-                label_bounding_box[0], label_bounding_box[1] = label_bounding_box[1], label_bounding_box[0]
-                label_bounding_box[2], label_bounding_box[3] = label_bounding_box[3], label_bounding_box[2]
+            # if np.sign(label_spacing[0]) != np.sign(src_spacing[0]):
+            #     # x/y axis direction mismatch
+            #     src_bounding_box[[0,1]] = src_bounding_box[[1,0]] # swap x bounds
+            #     src_bounding_box[[2,3]] = src_bounding_box[[3,2]] # swap y bounds
+            #     new_label_origin = np.array(src_origin)
+            #     src_dim = src_image.GetDimensions()
+            #     new_label_origin[0] += src_dim[0] * src_spacing[0]
+            #     new_label_origin[1] += src_dim[1] * src_spacing[1]
+            # else:
+            #     new_label_origin = src_origin
+
 
             bounding_box_diff = src_bounding_box - label_bounding_box
             extent_offset = np.round(bounding_box_diff / np.array([label_spacing[0], label_spacing[0], label_spacing[1], label_spacing[1], label_spacing[2], label_spacing[2]])).astype(np.int32)
@@ -224,7 +257,7 @@ class IsosurfaceInteractor(QVTKRenderWindowInteractor):
             print(src_bounding_box)
             print("---diff---")
             print(bounding_box_diff)
-            print("---offset---")
+            print("---extent offset---")
             print(extent_offset)
             print("---adapted extent---")
             print(extent)

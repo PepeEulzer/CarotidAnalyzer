@@ -388,6 +388,7 @@ class SegmentationModuleTab(QWidget):
         self.imgPos = ((position[0]-origin[0])/self.image.GetSpacing()[0], 
                        (position[1]-origin[1])/self.image.GetSpacing()[1], 
                        self.slice_view.slice)  # convert into image position
+        print(self.imgPos)
         self.circle.SetCenter(position[0],
                               position[1],
                               self.image.GetOrigin()[2]-self.image.GetExtent()[2])  # move circle if mouse moved 
