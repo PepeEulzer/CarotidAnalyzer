@@ -62,21 +62,22 @@ class CarotidAnalyzer(QMainWindow, Ui_MainWindow):
         self.button_load_file.clicked.connect(self.loadSelectedPatient)
         self.tree_widget_data.itemDoubleClicked.connect(self.loadSelectedPatient)
 
-        self.centerline_module.centerline_module_left.data_modified.connect(self.changesMade)
-        self.centerline_module.centerline_module_right.data_modified.connect(self.changesMade)
-        self.centerline_module.new_centerlines.connect(self.newCenterlines)
+        self.crop_module.data_modified.connect(self.changesMade)
+        self.crop_module.new_left_volume.connect(self.newLeftVolume)
+        self.crop_module.new_right_volume.connect(self.newRightVolume)
         self.segmentation_module.segmentation_module_left.data_modified.connect(self.changesMade)
         self.segmentation_module.segmentation_module_right.data_modified.connect(self.changesMade)
         self.segmentation_module.new_segmentation.connect(self.newSegmentation)
         self.segmentation_module.new_models.connect(self.newModels)
-
+        self.centerline_module.centerline_module_left.data_modified.connect(self.changesMade)
+        self.centerline_module.centerline_module_right.data_modified.connect(self.changesMade)
+        self.centerline_module.new_centerlines.connect(self.newCenterlines)
 
         # restore state properties
         settings = QSettings()
         # geometry = settings.value("MainWindow/Geometry")
         # if geometry:
         #     self.restoreGeometry(geometry)
-            
         dir = settings.value("LastWorkingDir")
         if dir != None:
             self.setWorkingDir(dir)
@@ -135,6 +136,10 @@ class CarotidAnalyzer(QMainWindow, Ui_MainWindow):
             add_if_exists("centerlines_right", "_right_lumen_centerlines.vtp", True)
             self.patient_data.append(patient_dict)
 
+            entry_volume_raw = ["Full Volume", "", ""]
+            entry_volume_raw[1] = SYM_YES if patient_dict["volume_raw"] else SYM_NO
+            entry_volume_raw[2] = entry_volume_raw[1]
+
             entry_volume = ["Crop Volume", "", ""]
             entry_volume[1] = SYM_YES if patient_dict["volume_left"] else SYM_NO
             entry_volume[2] = SYM_YES if patient_dict["volume_right"] else SYM_NO
@@ -156,6 +161,7 @@ class CarotidAnalyzer(QMainWindow, Ui_MainWindow):
             entry_centerlines[2] = SYM_YES if patient_dict["centerlines_right"] else SYM_NO
 
             entry_patient = QTreeWidgetItem([pID, "", ""])
+            entry_patient.addChild(QTreeWidgetItem(entry_volume_raw))
             entry_patient.addChild(QTreeWidgetItem(entry_volume))
             entry_patient.addChild(QTreeWidgetItem(entry_seg))
             entry_patient.addChild(QTreeWidgetItem(entry_lumen))
@@ -166,6 +172,9 @@ class CarotidAnalyzer(QMainWindow, Ui_MainWindow):
         self.tree_widget_data.resizeColumnToContents(0)
         self.tree_widget_data.resizeColumnToContents(1)
         self.tree_widget_data.resizeColumnToContents(2)
+
+        for i in range(self.tree_widget_data.topLevelItemCount()):
+            self.tree_widget_data.topLevelItem(i).setExpanded(False)
         
     
     def openWorkingDirDialog(self):
@@ -186,6 +195,9 @@ class CarotidAnalyzer(QMainWindow, Ui_MainWindow):
 
 
     def loadSelectedPatient(self):
+        if self.unsaved_changes:
+            return
+
         # get top parent item
         selected = self.tree_widget_data.currentItem()
         if selected == None:
@@ -301,6 +313,7 @@ class CarotidAnalyzer(QMainWindow, Ui_MainWindow):
     def changesMade(self):
         self.unsaved_changes = True
         self.setModulesClickable(False)
+        self.button_load_file.setEnabled(False)
         self.action_discard_changes.setEnabled(True)
         self.action_save_and_propagate.setEnabled(True)
     
@@ -309,6 +322,7 @@ class CarotidAnalyzer(QMainWindow, Ui_MainWindow):
         self.module_stack.currentWidget().discard()
         self.action_discard_changes.setEnabled(False)
         self.action_save_and_propagate.setEnabled(False)
+        self.button_load_file.setEnabled(True)
         self.unsaved_changes = False
         self.setModulesClickable(True)
 
@@ -319,8 +333,47 @@ class CarotidAnalyzer(QMainWindow, Ui_MainWindow):
         self.module_stack.currentWidget().save()
         self.action_discard_changes.setEnabled(False)
         self.action_save_and_propagate.setEnabled(False)
+        self.button_load_file.setEnabled(True)
         self.unsaved_changes = False
         self.setModulesClickable(True)
+
+    
+    def newLeftVolume(self):
+        print("New left volume!")
+        patient_ID = self.active_patient_dict['patient_ID']
+        base_path  = self.active_patient_dict['base_path']
+        path_left = os.path.join(base_path, patient_ID + "_left.nrrd")
+        seg_item = self.active_patient_tree_widget_item.child(1)
+        if os.path.exists(path_left):
+            self.active_patient_dict['volume_left'] = path_left
+            seg_item.setText(1, SYM_YES)
+
+        # propagate
+        self.segmentation_module.patient_dict = self.active_patient_dict
+        self.segmentation_module.segmentation_module_left.loadVolumeSeg(
+            self.active_patient_dict['volume_left'],
+            self.active_patient_dict['seg_left'],
+            self.active_patient_dict['seg_left_pred']
+        )
+
+
+    def newRightVolume(self):
+        print("New right volume!")
+        patient_ID = self.active_patient_dict['patient_ID']
+        base_path  = self.active_patient_dict['base_path']
+        path_right = os.path.join(base_path, patient_ID + "_right.nrrd")
+        seg_item = self.active_patient_tree_widget_item.child(1)
+        if os.path.exists(path_right):
+            self.active_patient_dict['volume_right'] = path_right
+            seg_item.setText(2, SYM_YES)
+
+        # propagate
+        self.segmentation_module.patient_dict = self.active_patient_dict
+        self.segmentation_module.segmentation_module_right.loadVolumeSeg(
+            self.active_patient_dict['volume_right'],
+            self.active_patient_dict['seg_right'],
+            self.active_patient_dict['seg_right_pred']
+        )
 
 
     def newSegmentation(self):
@@ -328,7 +381,7 @@ class CarotidAnalyzer(QMainWindow, Ui_MainWindow):
         base_path  = self.active_patient_dict['base_path']
         path_left = os.path.join(base_path, patient_ID + "_left.seg.nrrd")
         path_right = os.path.join(base_path, patient_ID + "_right.seg.nrrd")
-        seg_item = self.active_patient_tree_widget_item.child(1)
+        seg_item = self.active_patient_tree_widget_item.child(2)
         if os.path.exists(path_left):
             self.active_patient_dict['seg_left'] = path_left
             seg_item.setText(1, SYM_YES)
@@ -344,8 +397,8 @@ class CarotidAnalyzer(QMainWindow, Ui_MainWindow):
         path_left_plaque = os.path.join(base_path, "models", patient_ID + "_left_plaque.stl")
         path_right_lumen = os.path.join(base_path, "models", patient_ID + "_right_lumen.stl")
         path_right_plaque = os.path.join(base_path, "models", patient_ID + "_right_plaque.stl")
-        lumen_item = self.active_patient_tree_widget_item.child(2)
-        plaque_item = self.active_patient_tree_widget_item.child(3)
+        lumen_item = self.active_patient_tree_widget_item.child(3)
+        plaque_item = self.active_patient_tree_widget_item.child(4)
         if os.path.exists(path_left_lumen):
             self.active_patient_dict['lumen_model_left'] = path_left_lumen
             lumen_item.setText(1, SYM_YES)
@@ -369,7 +422,7 @@ class CarotidAnalyzer(QMainWindow, Ui_MainWindow):
         base_path  = self.active_patient_dict['base_path']
         path_left = os.path.join(base_path, "models", patient_ID + "_left_lumen_centerlines.vtp")
         path_right = os.path.join(base_path, "models", patient_ID + "_right_lumen_centerlines.vtp")
-        centerlines_item = self.active_patient_tree_widget_item.child(4)
+        centerlines_item = self.active_patient_tree_widget_item.child(5)
         if os.path.exists(path_left):
             self.active_patient_dict['centerlines_left'] = path_left
             centerlines_item.setText(1, SYM_YES)

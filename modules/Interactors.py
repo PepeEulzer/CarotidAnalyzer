@@ -1,10 +1,12 @@
+from cProfile import label
 import os
 
 import numpy as np
+import nrrd
 import vtk
+from vtk.util.numpy_support import numpy_to_vtk
 from PyQt5.QtCore import pyqtSignal
 from vtk.qt.QVTKRenderWindowInteractor import QVTKRenderWindowInteractor
-from vmtk import vmtkscripts
 
 from defaults import *
 
@@ -71,16 +73,15 @@ class ImageSliceInteractor(QVTKRenderWindowInteractor):
             self.slice_changed.emit(self.slice)
 
 
-    def loadNrrd(self, path, flip_x_y=False):
-        reader = vmtkscripts.vmtkImageReader()
-        reader.InputFileName = path
-        reader.Execute()
-        image = reader.Image
-        if flip_x_y:
-            sx, sy, sz = image.GetSpacing()
-            ox, oy, oz = image.GetOrigin()
-            image.SetSpacing(-sx, -sy, sz)
-            image.SetOrigin(-ox, -oy, oz)
+    def loadNrrd(self, path):
+        img_data, header = nrrd.read(path)
+        image = vtk.vtkImageData()
+        image.SetDimensions(header['sizes'])
+        image.SetSpacing(np.diagonal(header['space directions']))
+        image.SetOrigin(header['space origin'])
+        vtk_data_array = numpy_to_vtk(img_data.ravel(order='F'))
+        image.GetPointData().SetScalars(vtk_data_array)
+
         self.image_mapper.SetInputData(image)
         self.min_slice = self.image_mapper.GetSliceNumberMinValue()
         self.max_slice = self.image_mapper.GetSliceNumberMaxValue()
@@ -130,7 +131,6 @@ class IsosurfaceInteractor(QVTKRenderWindowInteractor):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.SetInteractorStyle(vtk.vtkInteractorStyleTrackballCamera())
-        # self.label_map = vtk.vtkImageData()
 
         # build isosurface, mapper, actor pipeline
         self.padding = vtk.vtkImageConstantPad()
@@ -181,38 +181,51 @@ class IsosurfaceInteractor(QVTKRenderWindowInteractor):
 
 
     def loadNrrd(self, path, src_image=None):
-        # read the file
-        reader = vmtkscripts.vmtkImageReader()
-        reader.InputFileName = path
-        reader.Execute()
+        img_data, header = nrrd.read(path)
+        label_origin = header['space origin']
+        label_spacing = np.copy(np.diagonal(header['space directions']))
+        label_dim = header['sizes']
 
-        # Set the extent of the labelmap to the fixed model size (120, 144, 248).
-        # Uses the source image (CTA volume) to position the labelmap.
-        # Assumes the labelmap extent and origin to be within the source image.
-        if src_image is not None:
-            label_origin = reader.Image.GetOrigin()
-            src_origin = src_image.GetOrigin()
-            src_spacing = src_image.GetSpacing()
-            x_offset = int(abs(round((src_origin[0] - label_origin[0]) / src_spacing[0])))
-            y_offset = int(abs(round((src_origin[1] - label_origin[1]) / src_spacing[1])))
-            z_offset = int(abs(round((src_origin[2] - label_origin[2]) / src_spacing[2])))
-            extent = np.array([-x_offset, 119-x_offset, -y_offset, 143-y_offset, -z_offset, 247-z_offset])
-            pad = vtk.vtkImageConstantPad()
-            pad.SetConstant(0)
-            pad.SetInputData(reader.Image)
-            pad.SetOutputWholeExtent(extent)
-            pad.Update()
-            label_map = pad.GetOutput()
-            label_map.SetOrigin(src_origin)
-            label_map.SetExtent(0, 119, 0, 143, 0, 247)
+        if src_image is None:
+            label_map = vtk.vtkImageData()
+            label_map.SetDimensions(label_dim)
+            label_map.SetSpacing(label_spacing)
+            label_map.SetOrigin(label_origin)
+            vtk_data_array = numpy_to_vtk(img_data.ravel(order='F'))
+            label_map.GetPointData().SetScalars(vtk_data_array)
+            img_raw = img_data
         else:
-            label_map = reader.Image
-        
-        
-        # convert to check if plaque actor is necessary
-        img_to_numpy = vmtkscripts.vmtkImageToNumpy()
-        img_to_numpy.Image = label_map
-        img_to_numpy.Execute()
+            src_origin = np.array(src_image.GetOrigin())
+            src_spacing = np.array(src_image.GetSpacing())
+            src_dim = np.array(src_image.GetDimensions())
+            img_raw = np.zeros(src_dim, dtype=np.uint8)
+
+            if np.sign(label_spacing[0]) != np.sign(src_spacing[0]):
+                label_origin[0] += (label_dim[0]-1) * label_spacing[0]
+                label_origin[1] += (label_dim[1]-1) * label_spacing[1]
+                img_data = img_data[::-1,::-1,::]
+            
+            # vector from source to label origin in pixels
+            v = np.round((label_origin - src_origin) / np.abs(src_spacing))
+            v = v.astype(np.int32)
+                
+            # If v is in any dimension larger than the source OR smaller than the negative label dim
+            # -> we are outside of the crop region -> keep the empty mask.
+            # Otherwise the image is cropped and fitted into the mask at its position:
+            if True not in (v > src_dim).tolist() and True not in (v < -1 * label_dim).tolist():
+                img_data_crop = img_data[-1*min(0, v[0]):min(label_dim[0],src_dim[0]-v[0]),
+                                         -1*min(0, v[1]):min(label_dim[1],src_dim[1]-v[1]),
+                                         -1*min(0, v[2]):min(label_dim[2],src_dim[2]-v[2])]
+                img_raw[max(0, v[0]):min(v[0]+label_dim[0], src_dim[0]),
+                        max(0, v[1]):min(v[1]+label_dim[1], src_dim[1]),
+                        max(0, v[2]):min(v[2]+label_dim[2], src_dim[2])] = img_data_crop
+
+            label_map = vtk.vtkImageData()
+            label_map.SetDimensions(src_dim)
+            label_map.SetSpacing(src_spacing)
+            label_map.SetOrigin(src_origin)
+            vtk_data_array = numpy_to_vtk(img_raw.ravel(order='F'))
+            label_map.GetPointData().SetScalars(vtk_data_array)
         
         # add padding
         extent = np.array(label_map.GetExtent())
@@ -221,20 +234,26 @@ class IsosurfaceInteractor(QVTKRenderWindowInteractor):
         self.padding.SetOutputWholeExtent(extent)
         
         # update the scene (pipeline triggers automatically)
-        self.renderer.AddActor(self.actor_lumen)
-        if 1.0 in img_to_numpy.ArrayDict['PointData']['ImageScalars']:
+        if 1.0 in img_raw:
             self.renderer.AddActor(self.actor_plaque)
+            plaque_pending = False
         else:
             self.renderer.RemoveActor(self.actor_plaque)
+            plaque_pending = True
+        if 2.0 in img_raw:
+            self.renderer.AddActor(self.actor_lumen)
+            lumen_pending = False
+        else:
+            self.renderer.RemoveActor(self.actor_lumen)
+            lumen_pending = True
         self.renderer.ResetCamera()
         self.GetRenderWindow().Render()
 
-        # return pointer if needed
-        return label_map
+        # return pointer to label map if needed, return pending labels
+        return label_map, plaque_pending, lumen_pending
 
 
     def reset(self):
-        # self.label_map = vtk.vtkImageData()
         self.renderer.RemoveActor(self.actor_lumen)
         self.renderer.RemoveActor(self.actor_plaque)
         self.GetRenderWindow().Render()

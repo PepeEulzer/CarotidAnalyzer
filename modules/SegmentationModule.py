@@ -23,14 +23,17 @@ class SegmentationModuleTab(QWidget):
         super().__init__(parent)
 
         # state
-        self.image = None           # underlying CTA volume image
-        self.label_map = None       # segmentation label map
-        self.label_map_data = None  # numpy array of raw label map scalar data
-        self.volume_file = False    # path to CTA volume file
-        self.pred_file = False      # path to CNN segmentation prediction file
-        self.editing_active = False # whether label map editing is active
-        self.brush_size = 0         # size of brush on label map
-        self.draw3D = False         # dimension of brush (2/3D) # ?: default=0 to force user to select dimension; work with true/false? (2 variables or 1 variable w/ true:=2d, false:=3D)
+        self.image = None                # underlying CTA volume image
+        self.label_map = None            # segmentation label map
+        self.label_map_data = None       # numpy array of raw label map scalar data
+        self.volume_file = False         # path to CTA volume file
+        self.pred_file = False           # path to CNN segmentation prediction file
+        self.plaque_pending = True       # True if no plaque pixels exist yet
+        self.lumen_pending = True        # True is not lumen pixels exist yet
+        self.model_camera_pending = True # True if camera of model_view has not been set yet
+        self.editing_active = False      # whether label map editing is active
+        self.brush_size = 0              # size of brush on label map
+        self.draw3D = False              # dimension of brush (2/3D) # ?: default=0 to force user to select dimension; work with true/false? (2 variables or 1 variable w/ true:=2d, false:=3D)
 
         # on-screen objects
         self.CNN_button = QPushButton("New Segmentation: Initialize with CNN")
@@ -67,10 +70,8 @@ class SegmentationModuleTab(QWidget):
         self.brush_size_slider.setVisible(False)
         self.brush_slider_label.setVisible(False)
         self.slice_view = ImageSliceInteractor(self)
-        self.slice_view.renderer.GetActiveCamera().SetViewUp(0, 1, 0)
         self.slice_view_slider = QSlider(Qt.Horizontal)
         self.model_view = IsosurfaceInteractor(self)
-        self.model_view.renderer.GetActiveCamera().SetViewUp(0, 1, 0)
 
         # add everything to a layout
         self.slice_view_layout = QVBoxLayout()
@@ -189,7 +190,6 @@ class SegmentationModuleTab(QWidget):
         self.picker = vtk.vtkPropPicker()
         
 
-
     def sliceChanged(self, slice_nr):
         self.slice_view_slider.setSliderPosition(slice_nr)
         self.mask_slice_mapper.SetSliceNumber(slice_nr)
@@ -208,41 +208,66 @@ class SegmentationModuleTab(QWidget):
         super(SegmentationModuleTab, self).hideEvent(event)  
     
 
-    def loadVolumeSeg(self, volume_file, seg_file, pred_file):
-        self.volume_file = volume_file
+    def loadVolumeSeg(self, volume_file, seg_file, pred_file, is_new_file=True):
         self.pred_file = pred_file
-        if volume_file:
-            self.image = self.slice_view.loadNrrd(volume_file, False)
-            self.brush_size = self.image.GetSpacing()[0]
-            self.edit_button.setEnabled(True)
-            self.slice_view_slider.setRange(
-                self.slice_view.min_slice,
-                self.slice_view.max_slice
-            )
-            self.slice_view_slider.setSliderPosition(self.slice_view.slice)
 
-        else:
-            self.slice_view.reset()
-            self.image = None
-        
-        if seg_file:
-            self.label_map = self.model_view.loadNrrd(seg_file, self.image)
-            self.__loadLabelMapData()
-            self.model_view.renderer.AddActor(self.lumen_outline_actor3D)
-            self.model_view.renderer.AddActor(self.plaque_outline_actor3D)
-            if not self.editing_active:
-                self.slice_view.renderer.AddActor(self.lumen_outline_actor2D)
-                self.slice_view.renderer.AddActor(self.plaque_outline_actor2D)
+        if volume_file:
+            # load image volume if it is new
+            if is_new_file:
+                self.image = self.slice_view.loadNrrd(volume_file)
+                self.brush_size = abs(self.image.GetSpacing()[0])
+                self.edit_button.setEnabled(True)
+                self.slice_view_slider.setRange(
+                    self.slice_view.min_slice,
+                    self.slice_view.max_slice
+                )
+                self.slice_view_slider.setSliderPosition(self.slice_view.slice)
+
+            # image exists -> load segmentation
+            if seg_file:
+                self.label_map, self.plaque_pending, self.lumen_pending = self.model_view.loadNrrd(seg_file, self.image)
+                self.__loadLabelMapData()
+                self.model_camera_pending = False
+                self.model_view.renderer.AddActor(self.lumen_outline_actor3D)
+                self.model_view.renderer.AddActor(self.plaque_outline_actor3D)
+                if not self.editing_active:
+                    self.slice_view.renderer.AddActor(self.lumen_outline_actor2D)
+                    self.slice_view.renderer.AddActor(self.plaque_outline_actor2D)
+            
+            # image exists -> create empty segmentation
+            else:
+                self.plaque_pending = True
+                self.lumen_pending = True
+                self.model_camera_pending = True
+                self.model_view.reset()
+                self.label_map = vtk.vtkImageData()
+                self.label_map.SetDimensions(self.image.GetDimensions())
+                self.label_map.SetSpacing(self.image.GetSpacing())
+                self.label_map.SetOrigin(self.image.GetOrigin())
+                self.label_map_data = np.zeros(self.label_map.GetDimensions(), dtype=np.uint8)
+                vtk_data_array = numpy_to_vtk(self.label_map_data.ravel(order='F'))
+                self.label_map.GetPointData().SetScalars(vtk_data_array)
+                self.masks_color_mapped.SetInputData(self.label_map)
+
+            # draw scene
             self.slice_view.GetRenderWindow().Render()
             self.model_view.GetRenderWindow().Render()
+
+        # no image -> reset
         else:
+            self.plaque_pending = True
+            self.lumen_pending = True
+            self.model_camera_pending = True
+            self.image = None
             self.label_map = None
+            self.label_map_data = None
+            self.deactivateEditing()
+            self.edit_button.setEnabled(False)
             self.model_view.renderer.RemoveActor(self.lumen_outline_actor3D)
             self.slice_view.renderer.RemoveActor(self.lumen_outline_actor2D)
             self.model_view.renderer.RemoveActor(self.plaque_outline_actor3D)
             self.slice_view.renderer.RemoveActor(self.plaque_outline_actor2D)
-            self.slice_view.GetRenderWindow().Render()
-            self.model_view.GetRenderWindow().Render()
+            self.slice_view.reset()
             self.model_view.reset()
 
 
@@ -258,8 +283,9 @@ class SegmentationModuleTab(QWidget):
             dlg.setStandardButtons(QMessageBox.Ok | QMessageBox.Cancel)
             button = dlg.exec()
             if button == QMessageBox.Ok:
-                self.model_view.loadNrrd(self.pred_file)
+                self.label_map, self.plaque_pending, self.lumen_pending = self.model_view.loadNrrd(self.pred_file)
                 self.__loadLabelMapData()
+                self.model_camera_pending = False
                 self.model_view.renderer.AddActor(self.lumen_outline_actor3D)
                 self.model_view.renderer.AddActor(self.plaque_outline_actor3D)
                 if not self.editing_active:
@@ -327,9 +353,11 @@ class SegmentationModuleTab(QWidget):
 
     def brushSizeChanged(self, brush_size): 
         # change size of drawing on label map
-        self.brush_size = int(round(brush_size*self.image.GetSpacing()[0]))
-        self.circle.SetRadius(self.brush_size*self.image.GetSpacing()[0])  
-        
+        x_spacing = abs(self.image.GetSpacing()[0]) # can be negative
+        self.brush_size = int(round(brush_size * x_spacing))
+        self.circle.SetRadius(self.brush_size * x_spacing)
+
+        # create circle mask
         axis = np.arange(-self.brush_size, self.brush_size+1, 1)
         if self.draw3D == False:  
             # create circle mask
@@ -419,7 +447,7 @@ class SegmentationModuleTab(QWidget):
         origin = self.image.GetOrigin()
         self.imgPos = ((position[0]-origin[0])/self.image.GetSpacing()[0], 
                        (position[1]-origin[1])/self.image.GetSpacing()[1], 
-                       (position[2]+origin[2])/self.image.GetSpacing()[2])  # convert into image position
+                       self.slice_view.slice)  # convert into image position
         self.circle.SetCenter(position[0],
                               position[1],
                               self.image.GetOrigin()[2]-self.image.GetExtent()[2])  # move circle if mouse moved 
@@ -427,13 +455,25 @@ class SegmentationModuleTab(QWidget):
 
 
     def start_draw(self, obj, event):
-        # draw first point at position clicked on 
+        # draw first point at position clicked on
         self.draw(obj,event)
-        self.data_modified.emit()
+
+        # check if pipeline needs updates
+        if self.plaque_pending and self.draw_value == 1.0:
+            self.model_view.renderer.AddActor(self.model_view.actor_plaque)
+            self.model_view.renderer.ResetCamera()
+            self.plaque_pending = False
+            self.slice_view.GetRenderWindow().Render()
+        elif self.lumen_pending and self.draw_value == 2.0:
+            self.model_view.renderer.AddActor(self.model_view.actor_lumen)
+            self.model_view.renderer.ResetCamera()
+            self.lumen_pending = False
+            self.slice_view.GetRenderWindow().Render()
 
         # draw as long as left mouse button pressed down 
         self.slice_view.interactor_style.AddObserver("MouseMoveEvent", self.draw)  
         self.slice_view.interactor_style.AddObserver("LeftButtonReleaseEvent", self.end_draw)
+        self.data_modified.emit()
     
 
     def draw(self, obj, event):  
@@ -485,26 +525,34 @@ class SegmentationModuleTab(QWidget):
     def update_3Ddisplay(self):
         self.model_view.padding.SetInputData(self.label_map)
         self.model_view.GetRenderWindow().Render()
+        if self.model_camera_pending == True:
+            self.model_view.renderer.ResetCamera()
+            self.model_view.GetRenderWindow().Render()
+            self.model_camera_pending = False
 
 
     def saveChanges(self, path_seg, path_lumen, path_plaque):
         # catch if one side has something to save, other side not
+        if self.label_map is None:
+            return
+
         x_dim, y_dim, z_dim = self.label_map.GetDimensions()
         if x_dim == 0 or y_dim == 0 or z_dim == 0:
             return
 
-        # save segmentation nrrd (geometry based on image volume)
-        header_img = nrrd.read_header(self.volume_file)
+        # save segmentation nrrd
+        sx, sy, sz = self.label_map.GetSpacing()
+        ox, oy, oz = self.label_map.GetOrigin()
         header = OrderedDict()
         header['type'] = 'unsigned char'
         header['dimension'] = 3
         header['space'] = 'left-posterior-superior'
         header['sizes'] = '120 144 248' # fixed model size
-        header['space directions'] = header_img['space directions']
+        header['space directions'] = [[sx, 0, 0], [0, sy, 0], [0, 0, sz]]
         header['kinds'] = ['domain', 'domain', 'domain']
         header['endian'] = 'little'
         header['encoding'] = 'gzip'
-        header['space origin'] = header_img['space origin']
+        header['space origin'] = [ox, oy, oz]
         header['Segment0_ID'] = 'Segment_1'
         header['Segment0_Name'] = 'plaque'
         header['Segment0_Color'] = str(241/255) + ' ' + str(214/255) + ' ' + str(145/255)
@@ -578,7 +626,10 @@ class SegmentationModule(QTabWidget):
 
 
     def discard(self):
-        self.loadPatient(self.patient_dict)
+        self.segmentation_module_right.loadVolumeSeg(
+            self.patient_dict['volume_right'], self.patient_dict['seg_right'], self.patient_dict['seg_right_pred'], False)
+        self.segmentation_module_left.loadVolumeSeg(
+            self.patient_dict['volume_left'], self.patient_dict['seg_left'], self.patient_dict['seg_left_pred'], False)
         self.setTabText(0, "Right")
         self.setTabText(1, "Left")
 
