@@ -186,96 +186,46 @@ class IsosurfaceInteractor(QVTKRenderWindowInteractor):
         label_spacing = np.copy(np.diagonal(header['space directions']))
         label_dim = header['sizes']
 
-        # if label_spacing[0] < 0:
-        #     label_origin[0] += (label_dim[0]-1) * label_spacing[0]
-        #     label_spacing[0] *= -1
-        #     img_data = img_data[::-1,::,::]
-
-        # if label_spacing[1] < 0:
-        #     label_origin[1] += (label_dim[1]-1) * label_spacing[1]
-        #     label_spacing[1] *= -1
-        #     img_data = img_data[::,::-1,::]
-
-        if src_image is not None:
+        if src_image is None:
+            label_map = vtk.vtkImageData()
+            label_map.SetDimensions(label_dim)
+            label_map.SetSpacing(label_spacing)
+            label_map.SetOrigin(label_origin)
+            vtk_data_array = numpy_to_vtk(img_data.ravel(order='F'))
+            label_map.GetPointData().SetScalars(vtk_data_array)
+            img_raw = img_data
+        else:
             src_origin = np.array(src_image.GetOrigin())
             src_spacing = np.array(src_image.GetSpacing())
             src_dim = np.array(src_image.GetDimensions())
+            img_raw = np.zeros(src_dim, dtype=np.uint8)
 
-            # case 1: x/y axis directions match
-            if np.sign(label_spacing[0]) == np.sign(src_spacing[0]):
-                # vector from source to label origin in pixels
-                src_to_label_origin = (label_origin - src_origin) / np.abs(src_spacing)
-                img_raw = np.zeros(src_dim, dtype=np.uint8)
-                
-
-        label_map = vtk.vtkImageData()
-        label_map.SetDimensions(label_dim)
-        label_map.SetSpacing(label_spacing)
-        label_map.SetOrigin(label_origin)
-        vtk_data_array = numpy_to_vtk(img_data.ravel(order='F'))
-        label_map.GetPointData().SetScalars(vtk_data_array)
-
-        # Set the extent of the labelmap to match the source image.
-        # Uses the source image (CTA volume) to position the labelmap.
-        if False:#src_image is not None:
-            src_origin = src_image.GetOrigin()
-            src_spacing = src_image.GetSpacing()
-            src_dim = src_image.GetDimensions()
+            if np.sign(label_spacing[0]) != np.sign(src_spacing[0]):
+                label_origin[0] += (label_dim[0]-1) * label_spacing[0]
+                label_origin[1] += (label_dim[1]-1) * label_spacing[1]
+                img_data = img_data[::-1,::-1,::]
             
+            # vector from source to label origin in pixels
+            v = np.round((label_origin - src_origin) / np.abs(src_spacing))
+            v = v.astype(np.int32)
+                
+            # If v is in any dimension larger than the source OR smaller than the negative label dim
+            # -> we are outside of the crop region -> keep the empty mask.
+            # Otherwise the image is cropped and fitted into the mask at its position:
+            if True not in (v > src_dim).tolist() and True not in (v < -1 * label_dim).tolist():
+                img_data_crop = img_data[-1*min(0, v[0]):min(label_dim[0],src_dim[0]-v[0]),
+                                         -1*min(0, v[1]):min(label_dim[1],src_dim[1]-v[1]),
+                                         -1*min(0, v[2]):min(label_dim[2],src_dim[2]-v[2])]
+                img_raw[max(0, v[0]):min(v[0]+label_dim[0], src_dim[0]),
+                        max(0, v[1]):min(v[1]+label_dim[1], src_dim[1]),
+                        max(0, v[2]):min(v[2]+label_dim[2], src_dim[2])] = img_data_crop
 
-            label_bounding_box = (
-                  np.array([label_origin[0], label_origin[0], label_origin[1], label_origin[1], label_origin[2], label_origin[2]])
-                + np.array([0, label_dim[0], 0, label_dim[1], 0, label_dim[2]])
-                * np.array([label_spacing[0], label_spacing[0], label_spacing[1], label_spacing[1], label_spacing[2], label_spacing[2]])
-            )
-
-            src_bounding_box = (
-                  np.array([src_origin[0], src_origin[0], src_origin[1], src_origin[1], src_origin[2], src_origin[2]])
-                + np.array([0, src_dim[0], 0, src_dim[1], 0, src_dim[2]])
-                * np.array([src_spacing[0], src_spacing[0], src_spacing[1], src_spacing[1], src_spacing[2], src_spacing[2]])
-            )
-
-            # if np.sign(label_spacing[0]) != np.sign(src_spacing[0]):
-            #     # x/y axis direction mismatch
-            #     src_bounding_box[[0,1]] = src_bounding_box[[1,0]] # swap x bounds
-            #     src_bounding_box[[2,3]] = src_bounding_box[[3,2]] # swap y bounds
-            #     new_label_origin = np.array(src_origin)
-            #     src_dim = src_image.GetDimensions()
-            #     new_label_origin[0] += src_dim[0] * src_spacing[0]
-            #     new_label_origin[1] += src_dim[1] * src_spacing[1]
-            # else:
-            #     new_label_origin = src_origin
-
-
-            bounding_box_diff = src_bounding_box - label_bounding_box
-            extent_offset = np.round(bounding_box_diff / np.array([label_spacing[0], label_spacing[0], label_spacing[1], label_spacing[1], label_spacing[2], label_spacing[2]])).astype(np.int32)
-            extent = np.array(label_map.GetExtent()) + extent_offset
-
-            print("---label---")
-            print(label_bounding_box)
-            print("---src---")
-            print(src_bounding_box)
-            print("---diff---")
-            print(bounding_box_diff)
-            print("---extent offset---")
-            print(extent_offset)
-            print("---adapted extent---")
-            print(extent)
-
-
-
-            # x_offset = int(round((label_origin[0] - src_origin[0]) / abs(src_spacing[0])))
-            # y_offset = int(round((label_origin[1] - src_origin[1]) / abs(src_spacing[1])))
-            # z_offset = int(round((label_origin[2] - src_origin[2]) / abs(src_spacing[2])))
-            # extent = np.array(src_image.GetExtent()) - np.array([x_offset, x_offset, y_offset, y_offset, z_offset, z_offset])
-            pad = vtk.vtkImageConstantPad()
-            pad.SetConstant(0)
-            pad.SetInputData(label_map)
-            pad.SetOutputWholeExtent(extent)
-            pad.Update()
-            label_map = pad.GetOutput()
+            label_map = vtk.vtkImageData()
+            label_map.SetDimensions(src_dim)
+            label_map.SetSpacing(src_spacing)
             label_map.SetOrigin(src_origin)
-            label_map.SetExtent(src_image.GetExtent())
+            vtk_data_array = numpy_to_vtk(img_raw.ravel(order='F'))
+            label_map.GetPointData().SetScalars(vtk_data_array)
         
         # add padding
         extent = np.array(label_map.GetExtent())
@@ -284,13 +234,13 @@ class IsosurfaceInteractor(QVTKRenderWindowInteractor):
         self.padding.SetOutputWholeExtent(extent)
         
         # update the scene (pipeline triggers automatically)
-        if 1.0 in img_data:
+        if 1.0 in img_raw:
             self.renderer.AddActor(self.actor_plaque)
             plaque_pending = False
         else:
             self.renderer.RemoveActor(self.actor_plaque)
             plaque_pending = True
-        if 2.0 in img_data:
+        if 2.0 in img_raw:
             self.renderer.AddActor(self.actor_lumen)
             lumen_pending = False
         else:

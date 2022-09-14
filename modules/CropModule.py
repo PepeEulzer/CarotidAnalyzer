@@ -200,12 +200,7 @@ class CropModule(QWidget):
         reslicer.SetOutputExtent(0, 119, 0, 143, 0, 247)
         reslicer.SetOutputSpacing([s*0.5 for s in spacing])
         reslicer.Update()
-
-        # output crop image
         crop_image = reslicer.GetOutput()
-        crop_image.SetOrigin(origin[0] + spacing[0] * (x-29),
-                             origin[1] + spacing[1] * (y-35),
-                             origin[2] + spacing[2] * (z-61))
 
         # adapt crop display
         ox, oy, oz = crop_image.GetOrigin()

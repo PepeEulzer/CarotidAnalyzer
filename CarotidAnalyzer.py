@@ -195,6 +195,9 @@ class CarotidAnalyzer(QMainWindow, Ui_MainWindow):
 
 
     def loadSelectedPatient(self):
+        if self.unsaved_changes:
+            return
+
         # get top parent item
         selected = self.tree_widget_data.currentItem()
         if selected == None:
@@ -310,6 +313,7 @@ class CarotidAnalyzer(QMainWindow, Ui_MainWindow):
     def changesMade(self):
         self.unsaved_changes = True
         self.setModulesClickable(False)
+        self.button_load_file.setEnabled(False)
         self.action_discard_changes.setEnabled(True)
         self.action_save_and_propagate.setEnabled(True)
     
@@ -318,6 +322,7 @@ class CarotidAnalyzer(QMainWindow, Ui_MainWindow):
         self.module_stack.currentWidget().discard()
         self.action_discard_changes.setEnabled(False)
         self.action_save_and_propagate.setEnabled(False)
+        self.button_load_file.setEnabled(True)
         self.unsaved_changes = False
         self.setModulesClickable(True)
 
@@ -328,6 +333,7 @@ class CarotidAnalyzer(QMainWindow, Ui_MainWindow):
         self.module_stack.currentWidget().save()
         self.action_discard_changes.setEnabled(False)
         self.action_save_and_propagate.setEnabled(False)
+        self.button_load_file.setEnabled(True)
         self.unsaved_changes = False
         self.setModulesClickable(True)
 

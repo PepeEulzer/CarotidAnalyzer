@@ -188,19 +188,20 @@ class SegmentationModuleTab(QWidget):
         super(SegmentationModuleTab, self).hideEvent(event)  
     
 
-    def loadVolumeSeg(self, volume_file, seg_file, pred_file):
+    def loadVolumeSeg(self, volume_file, seg_file, pred_file, is_new_file=True):
         self.pred_file = pred_file
 
-        # load image volume
         if volume_file:
-            self.image = self.slice_view.loadNrrd(volume_file)
-            self.brush_size = abs(self.image.GetSpacing()[0])
-            self.edit_button.setEnabled(True)
-            self.slice_view_slider.setRange(
-                self.slice_view.min_slice,
-                self.slice_view.max_slice
-            )
-            self.slice_view_slider.setSliderPosition(self.slice_view.slice)
+            # load image volume if it is new
+            if is_new_file:
+                self.image = self.slice_view.loadNrrd(volume_file)
+                self.brush_size = abs(self.image.GetSpacing()[0])
+                self.edit_button.setEnabled(True)
+                self.slice_view_slider.setRange(
+                    self.slice_view.min_slice,
+                    self.slice_view.max_slice
+                )
+                self.slice_view_slider.setSliderPosition(self.slice_view.slice)
 
             # image exists -> load segmentation
             if seg_file:
@@ -388,7 +389,6 @@ class SegmentationModuleTab(QWidget):
         self.imgPos = ((position[0]-origin[0])/self.image.GetSpacing()[0], 
                        (position[1]-origin[1])/self.image.GetSpacing()[1], 
                        self.slice_view.slice)  # convert into image position
-        print(self.imgPos)
         self.circle.SetCenter(position[0],
                               position[1],
                               self.image.GetOrigin()[2]-self.image.GetExtent()[2])  # move circle if mouse moved 
@@ -396,21 +396,25 @@ class SegmentationModuleTab(QWidget):
 
 
     def start_draw(self, obj, event):
+        # draw first point at position clicked on
+        self.draw(obj,event)
+
         # check if pipeline needs updates
         if self.plaque_pending and self.draw_value == 1.0:
             self.model_view.renderer.AddActor(self.model_view.actor_plaque)
+            self.model_view.renderer.ResetCamera()
             self.plaque_pending = False
+            self.slice_view.GetRenderWindow().Render()
         elif self.lumen_pending and self.draw_value == 2.0:
             self.model_view.renderer.AddActor(self.model_view.actor_lumen)
+            self.model_view.renderer.ResetCamera()
             self.lumen_pending = False
-
-        # draw first point at position clicked on
-        self.draw(obj,event)
-        self.data_modified.emit()
+            self.slice_view.GetRenderWindow().Render()
 
         # draw as long as left mouse button pressed down 
         self.slice_view.interactor_style.AddObserver("MouseMoveEvent", self.draw)  
         self.slice_view.interactor_style.AddObserver("LeftButtonReleaseEvent", self.end_draw)
+        self.data_modified.emit()
     
 
     def draw(self, obj, event):
@@ -547,7 +551,10 @@ class SegmentationModule(QTabWidget):
 
 
     def discard(self):
-        self.loadPatient(self.patient_dict)
+        self.segmentation_module_right.loadVolumeSeg(
+            self.patient_dict['volume_right'], self.patient_dict['seg_right'], self.patient_dict['seg_right_pred'], False)
+        self.segmentation_module_left.loadVolumeSeg(
+            self.patient_dict['volume_left'], self.patient_dict['seg_left'], self.patient_dict['seg_left_pred'], False)
         self.setTabText(0, "Right")
         self.setTabText(1, "Left")
 
