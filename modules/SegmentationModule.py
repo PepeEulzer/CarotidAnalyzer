@@ -1,5 +1,6 @@
 import os
 from collections import OrderedDict
+from turtle import position
 
 import numpy as np
 import nrrd
@@ -27,6 +28,7 @@ class SegmentationModuleTab(QWidget):
         self.image_data = None           # numpy array of raw image scalar data
         self.label_map = None            # segmentation label map
         self.label_map_data = None       # numpy array of raw label map scalar data
+        self.threshold_img = None        # image to display threshold 
         self.volume_file = False         # path to CTA volume file
         self.pred_file = False           # path to CNN segmentation prediction file
         self.plaque_pending = True       # True if no plaque pixels exist yet
@@ -59,7 +61,7 @@ class SegmentationModuleTab(QWidget):
         self.brush_slider_label.setText("Brush/Eraser Size") 
         self.threshold_slider = QSlider(Qt.Horizontal) 
         self.threshold_slider.setSingleStep(1)  
-        self.threshold_slider.setTickInterval(1)  # das weg? 
+        self.threshold_slider.setTickInterval(1)  
         self.threshold_slider_label = QLabel()
         self.threshold_slider_label.setText("Threshold: ")  
         self.threshold_slider_value = QLabel()
@@ -117,7 +119,7 @@ class SegmentationModuleTab(QWidget):
             self.model_view.smoother_lumen.GetOutputPort(), COLOR_LUMEN_DARK, COLOR_LUMEN)
         self.plaque_outline_actor3D, self.plaque_outline_actor2D = self.__createOutlineActors(
             self.model_view.smoother_plaque.GetOutputPort(), COLOR_PLAQUE_DARK, COLOR_PLAQUE)
-        self.__setupLUT()  # setup lookup table to display masks
+        self.__setupLUT()  # setup lookup table to display masks and threshold 
         self.__setupEditingPipeline()
 
 
@@ -131,6 +133,8 @@ class SegmentationModuleTab(QWidget):
         self.brush_3D.pressed.connect(self.set3DBrush)
         self.brush_size_slider.valueChanged[int].connect(self.brushSizeChanged)
         self.threshold_slider.valueChanged[int].connect(self.thresholdChanged)
+        self.threshold_slider.sliderPressed.connect(self.showThreshold)
+        self.threshold_slider.sliderReleased.connect(self.hideThreshold)
         self.stop_editing_button.pressed.connect(self.deactivateEditing)
         self.eraser_button.pressed.connect(self.setColorErase)
         self.lumen_button.pressed.connect(self.setColorLumen)  
@@ -163,17 +167,20 @@ class SegmentationModuleTab(QWidget):
 
 
     def __setupLUT(self):
+        # lookup table for label map 
         self.lut_lm = vtk.vtkLookupTable()  
-        self.lut_lm.SetNumberOfTableValues(3)
-        self.lut_lm.SetTableRange(0,2)
+        self.lut_lm.SetNumberOfTableValues(4)
+        self.lut_lm.SetTableRange(0,3)
         self.lut_lm.SetTableValue(0, 0.0, 0.0, 0.0, 0.0)  # set color of backround (id 0) to black with transparency 0
         alpha = (0.5,)
         self.lumen_rgba = COLOR_LUMEN + alpha
         self.plaque_rgba = COLOR_PLAQUE + alpha  
         self.lut_lm.SetTableValue(1, self.plaque_rgba)
         self.lut_lm.SetTableValue(2, self.lumen_rgba)
+        self.lut_lm.SetTableValue(3, 0.0,0.0, 1.0, 0.4) # set color of areas with values above threshold 
         self.lut_lm.Build() 
 
+        # lookup table for display of threshold 
         self.lut_threshold = vtk.vtkLookupTable()
         self.lut_threshold.SetNumberOfTableValues(2)
         self.lut_threshold.SetTableRange(0,1)
@@ -207,6 +214,7 @@ class SegmentationModuleTab(QWidget):
         self.threshold_color_mapped = vtk.vtkImageMapToColors() 
         self.threshold_color_mapped.SetLookupTable(self.lut_threshold) 
         self.threshold_color_mapped.PassAlphaToOutputOn()  
+        
         self.threshold_mapper = vtk.vtkOpenGLImageSliceMapper()
         self.threshold_mapper.SetInputConnection(self.threshold_color_mapped.GetOutputPort())
         self.threshold_mapper.SetSliceNumber(self.slice_view.slice)
@@ -223,9 +231,11 @@ class SegmentationModuleTab(QWidget):
         self.slice_view_slider.setSliderPosition(slice_nr)
         self.mask_slice_mapper.SetSliceNumber(slice_nr)
         self.threshold_mapper.SetSliceNumber(slice_nr)
-        if self.image: 
-            self.thresholdChanged(self.threshold)
-        self.model_view.GetRenderWindow().Render()
+        # check what to update 
+        if self.auto_update_box.isChecked():
+            self.model_view.GetRenderWindow().Render()
+        else: 
+            self.slice_view.GetRenderWindow().Render()
         
 
     def showEvent(self, event):
@@ -239,27 +249,22 @@ class SegmentationModuleTab(QWidget):
         self.slice_view.EnableRenderOff()
         super(SegmentationModuleTab, self).hideEvent(event)  
     
+
     def loadVolumeSeg(self, volume_file, seg_file, pred_file, is_new_file=True):
         self.pred_file = pred_file
-
         if volume_file:
             # load image volume if it is new
             if is_new_file:
                 self.image = self.slice_view.loadNrrd(volume_file)
-                shape = self.image.GetDimensions()
-                self.image_data = vtk_to_numpy(self.image.GetPointData().GetScalars())
-                self.image_data = self.image_data.reshape(shape, order='F')
-                # rescale values of image data to [0,255]
-                min,max = self.image_data.min(),self.image_data.max()
-                val_range = max-min
-                self.image_data = (self.image_data - min)/val_range*255
+                self.__loadImageData()
                 self.brush_size = abs(self.image.GetSpacing()[0])
                 self.edit_button.setEnabled(True)
                 self.slice_view_slider.setRange(
                     self.slice_view.min_slice,
                     self.slice_view.max_slice
                 )
-                self.slice_view_slider.setSliderPosition(self.slice_view.slice)
+                self.slice_view_slider.setSliderPosition(self.slice_view.slice)  
+                
 
             # image exists -> load segmentation
             if seg_file:
@@ -286,10 +291,11 @@ class SegmentationModuleTab(QWidget):
                 vtk_data_array = numpy_to_vtk(self.label_map_data.ravel(order='F'))
                 self.label_map.GetPointData().SetScalars(vtk_data_array)
                 self.masks_color_mapped.SetInputData(self.label_map)
-
+                
             # draw scene
             self.slice_view.GetRenderWindow().Render()
             self.model_view.GetRenderWindow().Render()
+
 
         # no image -> reset
         else:
@@ -300,6 +306,7 @@ class SegmentationModuleTab(QWidget):
             self.image_data = None
             self.label_map = None
             self.label_map_data = None
+            self.threshold_img = None
             self.deactivateEditing()
             self.edit_button.setEnabled(False)
             self.model_view.renderer.RemoveActor(self.lumen_outline_actor3D)
@@ -342,6 +349,34 @@ class SegmentationModuleTab(QWidget):
         self.masks_color_mapped.SetInputData(self.label_map)
 
 
+    def __loadImageData(self):  # double underscore necessary?
+        # image to display threshold
+        shape = self.image.GetDimensions()
+        position = self.image.GetOrigin()
+        spacing = self.image.GetSpacing()
+        
+        self.threshold_img = vtk.vtkImageData()  
+        self.threshold_img.SetDimensions(shape)
+        self.threshold_img.SetOrigin(position)
+        self.threshold_img.SetSpacing(spacing)
+
+        # load pixel values of image and rescale to [0,255]
+        self.image_data = vtk_to_numpy(self.image.GetPointData().GetScalars())
+        self.image_data = self.image_data.reshape(shape, order='F')
+        min,max = self.image_data.min(),self.image_data.max()
+        val_range = max-min
+        self.image_data = (self.image_data - min)/val_range*255
+        self.threshold_color_mapped.SetInputData(self.threshold_img)
+
+
+    def setUpCircle(self): 
+        #set up circle to display around cursor and to display brush size  
+        circle = vtk.vtkRegularPolygonSource() 
+        circle.GeneratePolygonOff()
+        circle.SetNumberOfSides(20)
+        return circle
+
+
     def activateEditing(self): 
         # show all buttons that are needed for editing
         self.brush_button.setVisible(True)
@@ -355,7 +390,6 @@ class SegmentationModuleTab(QWidget):
         self.slice_view.renderer.RemoveActor(self.lumen_outline_actor2D)
         self.slice_view.renderer.RemoveActor(self.plaque_outline_actor2D)
         self.slice_view.renderer.AddActor(self.mask_slice_actor)
-        self.slice_view.renderer.AddActor(self.threshold_actor)
         self.slice_view.GetRenderWindow().Render()
       
         
@@ -380,16 +414,7 @@ class SegmentationModuleTab(QWidget):
         self.slice_view.renderer.AddActor(self.plaque_outline_actor2D)
         self.slice_view.renderer.RemoveActor(self.mask_slice_actor)
         self.slice_view.renderer.RemoveActor(self.circle_actor)
-        self.slice_view.renderer.RemoveActor(self.threshold_actor)
         self.slice_view.GetRenderWindow().Render()
-
-
-    def setUpCircle(self): 
-        #set up circle to display around cursor and to display brush size  
-        circle = vtk.vtkRegularPolygonSource() 
-        circle.GeneratePolygonOff()
-        circle.SetNumberOfSides(20)
-        return circle
 
 
     def brushSizeChanged(self, brush_size): 
@@ -418,15 +443,26 @@ class SegmentationModuleTab(QWidget):
         self.circle_mask = R.astype(np.bool_) 
         self.slice_view.GetRenderWindow().Render() 
 
+    def set2DBrush(self):
+        # set up 2D brush 
+        self.draw3D = False
+        self.brushSizeChanged(abs(round(self.brush_size/self.image.GetSpacing()[0])))
+        self.brush_2D.setStyleSheet("background-color: rgb(175,175,175)")
+        self.brush_3D.setStyleSheet("background-color: light gray")
+        
+    def set3DBrush(self):
+        # set up 3D brush 
+        self.draw3D = True
+        self.brushSizeChanged(abs(round(self.brush_size/self.image.GetSpacing()[0])))
+        self.brush_3D.setStyleSheet("background-color: rgb(175,175,175)")
+        self.brush_2D.setStyleSheet("background-color: light gray")
+
+
     def thresholdChanged(self,threshold):
         self.threshold = threshold
         self.threshold_slider_value.setText(str(self.threshold))  # update slider label 
 
-        # define image for display of current threshold
-        threshold_img = vtk.vtkImageData()  
-        threshold_img.SetDimensions(self.image.GetDimensions())
-        threshold_img.SetOrigin(self.image.GetOrigin())
-        threshold_img.SetSpacing(self.image.GetSpacing())
+        # get copy of pixel values 
         threshold_img_data = np.copy(self.image_data)
 
         # fit slider to values in current slice 
@@ -442,29 +478,19 @@ class SegmentationModuleTab(QWidget):
         threshold_img_data[threshold_img_data>self.threshold] = 1
         self.threshold_mask = threshold_img_data.astype(np.bool_)
         vtk_data_array = numpy_to_vtk(threshold_img_data.ravel(order='F'))
-        threshold_img.GetPointData().SetScalars(vtk_data_array)
+        self.threshold_img.GetPointData().SetScalars(vtk_data_array)
         
-        # connect with pipeline 
-        self.threshold_color_mapped.SetInputData(threshold_img)
+        # update scene 
         self.slice_view.GetRenderWindow().Render()
-        
 
     def showThreshold(self):
-        self.slice_view.renderer.AddActor() # soll für temporäre Anzeige genutzt werden 
+        self.slice_view.renderer.AddActor(self.threshold_actor) 
+        self.slice_view.GetRenderWindow().Render()
 
-    def set2DBrush(self):
-        # set up 2D brush 
-        self.draw3D = False
-        self.brushSizeChanged(abs(round(self.brush_size/self.image.GetSpacing()[0])))
-        self.brush_2D.setStyleSheet("background-color: rgb(175,175,175)")
-        self.brush_3D.setStyleSheet("background-color: light gray")
+    def hideThreshold(self):
+        self.slice_view.renderer.RemoveActor(self.threshold_actor)
+        self.slice_view.GetRenderWindow().Render()  # checkbox for option to show at all times?
         
-    def set3DBrush(self):
-        # set up 3D brush 
-        self.draw3D = True
-        self.brushSizeChanged(abs(round(self.brush_size/self.image.GetSpacing()[0])))
-        self.brush_3D.setStyleSheet("background-color: rgb(175,175,175)")
-        self.brush_2D.setStyleSheet("background-color: light gray")
 
     def setColorLumen(self):
         self.draw_value = 2
@@ -473,14 +499,12 @@ class SegmentationModuleTab(QWidget):
         self.eraser_button.setStyleSheet("background-color: light gray")
         self.circle_actor.GetProperty().SetColor(COLOR_LUMEN)  # set color of circle to lumen 
 
-
     def setColorPlaque(self):
         self.draw_value = 1
         self.lumen_button.setStyleSheet("background-color: light gray")
         self.plaque_button.setStyleSheet("background-color: rgb(241,214,145)")
         self.eraser_button.setStyleSheet("background-color: light gray")
         self.circle_actor.GetProperty().SetColor(COLOR_PLAQUE)  # set color of circle to plaque 
-
 
     def setColorErase(self):
         self.draw_value = 0
@@ -489,6 +513,7 @@ class SegmentationModuleTab(QWidget):
         self.eraser_button.setStyleSheet("background-color: rgb(175,175,175)")
         self.circle_actor.GetProperty().SetColor(1,1,1)   # show circle in white 
     
+
     def drawMode(self):  
         self.slice_view.interactor_style.AddObserver("MouseMoveEvent", self.pickPosition)
         self.slice_view.interactor_style.AddObserver("LeftButtonPressEvent", self.start_draw)  
@@ -545,7 +570,6 @@ class SegmentationModuleTab(QWidget):
         self.slice_view.interactor_style.AddObserver("LeftButtonReleaseEvent", self.end_draw)
         self.data_modified.emit()
     
-
     def draw(self, obj, event):  
         # get discrete click position on label map
         x = int(round(self.imgPos[0]))
@@ -580,28 +604,20 @@ class SegmentationModuleTab(QWidget):
                 threshold = np.invert(threshold)
             mask = threshold & mask 
             self.label_map_data[x0:x1,y0:y1,z0:z1][mask] = self.draw_value  
-            
+
         # update the label map (shallow copies make this efficient)   
         vtk_data_array = numpy_to_vtk(self.label_map_data.ravel(order='F'))
         self.label_map.GetPointData().SetScalars(vtk_data_array)
         self.slice_view.GetRenderWindow().Render()
         
         
-
     def end_draw(self, obj, event):
         self.slice_view.interactor_style.RemoveObserver(self.down)  
 
         if self.auto_update_box.isChecked():  # update if auto-update checkbox is checked
-            self.update_3Ddisplay()
-        
-    def update_3Ddisplay(self):
-        self.model_view.padding.SetInputData(self.label_map)
-        self.model_view.GetRenderWindow().Render()
-        if self.model_camera_pending == True:
-            self.model_view.renderer.ResetCamera()
+            self.model_view.padding.SetInputData(self.label_map)
             self.model_view.GetRenderWindow().Render()
-            self.model_camera_pending = False
-
+        
 
     def saveChanges(self, path_seg, path_lumen, path_plaque):
         # catch if one side has something to save, other side not
