@@ -32,22 +32,24 @@ class SegmentationModuleTab(QWidget):
         self.volume_file = False         # path to CTA volume file
         self.pred_file = False           # path to CNN segmentation prediction file
         self.plaque_pending = True       # True if no plaque pixels exist yet
-        self.lumen_pending = True        # True is not lumen pixels exist yet
+        self.lumen_pending = True        # True if not lumen pixels exist yet
         self.model_camera_pending = True # True if camera of model_view has not been set yet
-        self.editing_active = False      # whether label map editing is active
-        self.brush_size = 0              # size of brush on label map
+        self.editing_active = False      # True if label map editing is active
+        self.brush_active = False        # True if brush/drawing is active  # temporary fix
+        self.brush_size = 15             # size of brush on label map
         self.threshold = 0               # value of threshold for drawing with brush 
         self.draw3D = False              # dimension of brush (2/3D) 
 
         # on-screen objects
+        self.slice_view = ImageSliceInteractor(self)
+        self.slice_view_slider = QSlider(Qt.Horizontal)
+        self.model_view = IsosurfaceInteractor(self)
         self.CNN_button = QPushButton("New Segmentation: Initialize with CNN")
         self.edit_button = QPushButton("Edit Segmentation")  
-        self.edit_button.setEnabled(False)
         self.brush_button = QPushButton("Brush") 
         self.brush_2D = QPushButton("2D") 
         self.brush_3D = QPushButton("3D")
         self.auto_update_box = QCheckBox("auto-update")
-        self.stop_editing_button = QPushButton("Stop Editing")
         self.lumen_button = QPushButton("Lumen")
         self.plaque_button = QPushButton("Plaque")
         self.eraser_button = QPushButton("Eraser")
@@ -55,7 +57,7 @@ class SegmentationModuleTab(QWidget):
         self.brush_size_slider.setMinimum(1)
         self.brush_size_slider.setMaximum(51)
         self.brush_size_slider.setSingleStep(2)
-        self.brush_size_slider.setValue(15)
+        self.brush_size_slider.setValue(self.brush_size)
         self.brush_size_slider.setTickInterval(1)
         self.brush_slider_label = QLabel()
         self.brush_slider_label.setText("Brush/Eraser Size") 
@@ -66,23 +68,26 @@ class SegmentationModuleTab(QWidget):
         self.threshold_slider_label.setText("Threshold: ")  
         self.threshold_slider_value = QLabel()
         self.threshold_slider_value.setText(str(self.threshold))
-        self.brush_button.setVisible(False)
-        self.brush_2D.setVisible(False) 
-        self.brush_3D.setVisible(False)
-        self.auto_update_box.setVisible(False)
+        self.drop_brush_button = QPushButton("Drop Brush")
+        self.stop_editing_button = QPushButton("Stop Editing")
+
+        self.edit_button.setEnabled(False)
+        self.brush_button.setEnabled(False)
+        self.brush_2D.setEnabled(False) 
+        self.brush_3D.setEnabled(False)
+        self.auto_update_box.setEnabled(False)
         self.auto_update_box.setChecked(True) 
-        self.eraser_button.setVisible(False)
-        self.stop_editing_button.setVisible(False)
-        self.lumen_button.setVisible(False)
-        self.plaque_button.setVisible(False)
-        self.brush_size_slider.setVisible(False)
-        self.brush_slider_label.setVisible(False)
-        self.threshold_slider.setVisible(False)
-        self.threshold_slider_label.setVisible(False)
-        self.threshold_slider_value.setVisible(False)
-        self.slice_view = ImageSliceInteractor(self)
-        self.slice_view_slider = QSlider(Qt.Horizontal)
-        self.model_view = IsosurfaceInteractor(self)
+        self.eraser_button.setEnabled(False)
+        self.stop_editing_button.setEnabled(False)
+        self.lumen_button.setEnabled(False)
+        self.plaque_button.setEnabled(False)
+        self.brush_size_slider.setEnabled(False)
+        self.brush_slider_label.setEnabled(False)
+        self.threshold_slider.setEnabled(False)
+        self.threshold_slider_label.setEnabled(False)
+        self.threshold_slider_value.setEnabled(False)
+        self.drop_brush_button.setEnabled(False)
+
 
         # add everything to a layout
         self.slice_view_layout = QVBoxLayout()
@@ -94,19 +99,20 @@ class SegmentationModuleTab(QWidget):
         self.edit_buttons_layout = QGridLayout()
         self.edit_buttons_layout.setVerticalSpacing(30)  
         self.edit_buttons_layout.addWidget(self.brush_button, 0,0,1,2) 
-        self.edit_buttons_layout.addWidget(self.brush_2D, 0,0)
-        self.edit_buttons_layout.addWidget(self.brush_3D, 0,1)
-        self.edit_buttons_layout.addWidget(self.auto_update_box, 1,0,1,2)
-        self.edit_buttons_layout.addWidget(self.lumen_button, 2,0)
-        self.edit_buttons_layout.addWidget(self.plaque_button, 2,1)
-        self.edit_buttons_layout.addWidget(self.eraser_button, 3,0,1,2)
-        self.edit_buttons_layout.addWidget(self.brush_slider_label, 4,0,1,2)
-        self.edit_buttons_layout.addWidget(self.brush_size_slider, 5,0,1,2)
-        self.edit_buttons_layout.addWidget(self.threshold_slider_label, 6,0)
-        self.edit_buttons_layout.addWidget(self.threshold_slider_value, 6,1)
-        self.edit_buttons_layout.addWidget(self.threshold_slider, 7,0,1,2)
-        self.edit_buttons_layout.addWidget(self.stop_editing_button, 8,0,1,2)
-        self.edit_buttons_layout.setRowStretch(10,1)  
+        self.edit_buttons_layout.addWidget(self.brush_2D, 1,0)
+        self.edit_buttons_layout.addWidget(self.brush_3D, 1,1)
+        self.edit_buttons_layout.addWidget(self.auto_update_box, 2,0,1,2)
+        self.edit_buttons_layout.addWidget(self.lumen_button, 3,0)
+        self.edit_buttons_layout.addWidget(self.plaque_button, 3,1)
+        self.edit_buttons_layout.addWidget(self.eraser_button, 4,0,1,2)
+        self.edit_buttons_layout.addWidget(self.brush_slider_label, 5,0,1,2)
+        self.edit_buttons_layout.addWidget(self.brush_size_slider, 6,0,1,2)
+        self.edit_buttons_layout.addWidget(self.threshold_slider_label, 7,0)
+        self.edit_buttons_layout.addWidget(self.threshold_slider_value, 7,1)
+        self.edit_buttons_layout.addWidget(self.threshold_slider, 8,0,1,2)
+        self.edit_buttons_layout.addWidget(self.drop_brush_button, 9,0,1,2)
+        self.edit_buttons_layout.addWidget(self.stop_editing_button, 10,0,1,2)
+        self.edit_buttons_layout.setRowStretch(11,1)  
 
         self.top_layout = QHBoxLayout(self)
         self.top_layout.addLayout(self.slice_view_layout)
@@ -136,6 +142,7 @@ class SegmentationModuleTab(QWidget):
         self.threshold_slider.sliderPressed.connect(self.showThreshold)
         self.threshold_slider.sliderReleased.connect(self.hideThreshold)
         self.stop_editing_button.pressed.connect(self.deactivateEditing)
+        self.drop_brush_button.pressed.connect(self.endDrawMode)
         self.eraser_button.pressed.connect(self.setColorErase)
         self.lumen_button.pressed.connect(self.setColorLumen)  
         self.plaque_button.pressed.connect(self.setColorPlaque)
@@ -169,15 +176,14 @@ class SegmentationModuleTab(QWidget):
     def __setupLUT(self):
         # lookup table for label map 
         self.lut_lm = vtk.vtkLookupTable()  
-        self.lut_lm.SetNumberOfTableValues(4)
-        self.lut_lm.SetTableRange(0,3)
+        self.lut_lm.SetNumberOfTableValues(3)
+        self.lut_lm.SetTableRange(0,2)
         self.lut_lm.SetTableValue(0, 0.0, 0.0, 0.0, 0.0)  # set color of backround (id 0) to black with transparency 0
         alpha = (0.5,)
         self.lumen_rgba = COLOR_LUMEN + alpha
         self.plaque_rgba = COLOR_PLAQUE + alpha  
         self.lut_lm.SetTableValue(1, self.plaque_rgba)
         self.lut_lm.SetTableValue(2, self.lumen_rgba)
-        self.lut_lm.SetTableValue(3, 0.0,0.0, 1.0, 0.4) # set color of areas with values above threshold 
         self.lut_lm.Build() 
 
         # lookup table for display of threshold 
@@ -257,7 +263,7 @@ class SegmentationModuleTab(QWidget):
             if is_new_file:
                 self.image = self.slice_view.loadNrrd(volume_file)
                 self.__loadImageData()
-                self.brush_size = abs(self.image.GetSpacing()[0])
+                self.brush_size = abs(self.image.GetSpacing()[0]*self.brush_size)  
                 self.edit_button.setEnabled(True)
                 self.slice_view_slider.setRange(
                     self.slice_view.min_slice,
@@ -378,11 +384,10 @@ class SegmentationModuleTab(QWidget):
 
 
     def activateEditing(self): 
-        # show all buttons that are needed for editing
-        self.brush_button.setVisible(True)
-        self.stop_editing_button.setVisible(True)
+        # enable all buttons that are needed for editing
+        self.brush_button.setEnabled(True)
+        self.stop_editing_button.setEnabled(True)
         self.edit_button.setEnabled(False)
-        self.brushSizeChanged(15)
         self.setColorErase()  
         self.set2DBrush()
 
@@ -394,29 +399,19 @@ class SegmentationModuleTab(QWidget):
       
         
     def deactivateEditing(self):
-        # hide all buttons and remove all actors for editing, enable editing again
+        # disable all buttons and remove all actors for editing, enable editing again
         self.editing_active = False
-        self.brush_button.setVisible(False)
-        self.brush_2D.setVisible(False)
-        self.brush_3D.setVisible(False)
-        self.auto_update_box.setVisible(False)
-        self.stop_editing_button.setVisible(False)
-        self.lumen_button.setVisible(False)
-        self.plaque_button.setVisible(False)
-        self.eraser_button.setVisible(False)
-        self.brush_size_slider.setVisible(False)
-        self.brush_slider_label.setVisible(False)
-        self.threshold_slider.setVisible(False)
-        self.threshold_slider_label.setVisible(False)
-        self.threshold_slider_value.setVisible(False)
+        self.endDrawMode()
+        self.brush_button.setEnabled(False)
+        self.brush_button.setEnabled(False)
         self.edit_button.setEnabled(True)
+        self.stop_editing_button.setEnabled(False)
         self.slice_view.renderer.AddActor(self.lumen_outline_actor2D)
         self.slice_view.renderer.AddActor(self.plaque_outline_actor2D)
         self.slice_view.renderer.RemoveActor(self.mask_slice_actor)
-        self.slice_view.renderer.RemoveActor(self.circle_actor)
         self.slice_view.GetRenderWindow().Render()
-
-
+        
+    
     def brushSizeChanged(self, brush_size): 
         # change size of drawing on label map
         x_spacing = abs(self.image.GetSpacing()[0]) # can be negative
@@ -514,25 +509,47 @@ class SegmentationModuleTab(QWidget):
         self.circle_actor.GetProperty().SetColor(1,1,1)   # show circle in white 
     
 
-    def drawMode(self):  
-        self.slice_view.interactor_style.AddObserver("MouseMoveEvent", self.pickPosition)
-        self.slice_view.interactor_style.AddObserver("LeftButtonPressEvent", self.start_draw)  
-        self.brush_button.setVisible(False)
-        self.brush_2D.setVisible(True)
-        self.brush_3D.setVisible(True)
-        self.auto_update_box.setVisible(True)
-        self.lumen_button.setVisible(True) 
-        self.plaque_button.setVisible(True)
-        self.eraser_button.setVisible(True)
-        self.brush_size_slider.setVisible(True)
-        self.brush_slider_label.setVisible(True) 
-        self.threshold_slider.setVisible(True)
-        self.threshold_slider_label.setVisible(True)
-        self.threshold_slider_value.setVisible(True)
-        self.slice_view.renderer.AddActor(self.circle_actor)  
+    def drawMode(self):
+        self.brush_active = True  
+        self.pickEvent = self.slice_view.interactor_style.AddObserver("MouseMoveEvent", self.pickPosition) 
+        self.startEvent = self.slice_view.interactor_style.AddObserver("LeftButtonPressEvent", self.start_draw) 
+        self.brush_button.setEnabled(False)
+        self.brush_2D.setEnabled(True)
+        self.brush_3D.setEnabled(True)
+        self.auto_update_box.setEnabled(True)
+        self.lumen_button.setEnabled(True) 
+        self.plaque_button.setEnabled(True)
+        self.eraser_button.setEnabled(True)
+        self.brush_size_slider.setEnabled(True)
+        self.brush_slider_label.setEnabled(True) 
+        self.threshold_slider.setEnabled(True)
+        self.threshold_slider_label.setEnabled(True)
+        self.threshold_slider_value.setEnabled(True)
+        self.drop_brush_button.setEnabled(True)
+        self.slice_view.renderer.AddActor(self.circle_actor) 
         self.thresholdChanged(self.threshold)  
         self.slice_view.GetRenderWindow().Render()
     
+    def endDrawMode(self):
+        self.brush_button.setEnabled(True)
+        self.drop_brush_button.setEnabled(False)
+        self.brush_2D.setEnabled(False)
+        self.brush_3D.setEnabled(False)
+        self.auto_update_box.setEnabled(False)
+        self.lumen_button.setEnabled(False)
+        self.plaque_button.setEnabled(False)
+        self.eraser_button.setEnabled(False)
+        self.brush_size_slider.setEnabled(False)
+        self.brush_slider_label.setEnabled(False)
+        self.threshold_slider.setEnabled(False)
+        self.threshold_slider_label.setEnabled(False)
+        self.threshold_slider_value.setEnabled(False)
+        self.slice_view.renderer.RemoveActor(self.circle_actor)
+        if self.brush_active:
+            self.slice_view.interactor_style.RemoveObserver(self.startEvent) 
+            self.slice_view.interactor_style.RemoveObserver(self.pickEvent)
+            self.slice_view.GetRenderWindow().Render() 
+        self.brush_active = False 
 
     def pickPosition(self, obj, event):
         # pick current mouse position
@@ -566,8 +583,8 @@ class SegmentationModuleTab(QWidget):
             self.slice_view.GetRenderWindow().Render()
 
         # draw as long as left mouse button pressed down 
-        self.down = self.slice_view.interactor_style.AddObserver("MouseMoveEvent", self.draw)  
-        self.slice_view.interactor_style.AddObserver("LeftButtonReleaseEvent", self.end_draw)
+        self.drawEvent = self.slice_view.interactor_style.AddObserver("MouseMoveEvent", self.draw) 
+        self.endEvent = self.slice_view.interactor_style.AddObserver("LeftButtonReleaseEvent", self.end_draw) 
         self.data_modified.emit()
     
     def draw(self, obj, event):  
@@ -612,7 +629,8 @@ class SegmentationModuleTab(QWidget):
         
         
     def end_draw(self, obj, event):
-        self.slice_view.interactor_style.RemoveObserver(self.down)  
+        self.slice_view.interactor_style.RemoveObserver(self.drawEvent)  
+        self.slice_view.interactor_style.RemoveObserver(self.endEvent) 
 
         if self.auto_update_box.isChecked():  # update if auto-update checkbox is checked
             self.model_view.padding.SetInputData(self.label_map)
