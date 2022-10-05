@@ -86,7 +86,7 @@ class SegmentationModuleTab(QWidget):
         self.threshold_slider.setEnabled(False)
         self.threshold_slider_label.setEnabled(False)
         self.threshold_slider_value.setEnabled(False)
-        self.drop_brush_button.setEnabled(False)
+        self.drop_brush_button.setVisible(False)
 
 
         # add everything to a layout
@@ -99,6 +99,7 @@ class SegmentationModuleTab(QWidget):
         self.edit_buttons_layout = QGridLayout()
         self.edit_buttons_layout.setVerticalSpacing(30)  
         self.edit_buttons_layout.addWidget(self.brush_button, 0,0,1,2) 
+        self.edit_buttons_layout.addWidget(self.drop_brush_button, 0,0,1,2)
         self.edit_buttons_layout.addWidget(self.brush_2D, 1,0)
         self.edit_buttons_layout.addWidget(self.brush_3D, 1,1)
         self.edit_buttons_layout.addWidget(self.auto_update_box, 2,0,1,2)
@@ -110,9 +111,9 @@ class SegmentationModuleTab(QWidget):
         self.edit_buttons_layout.addWidget(self.threshold_slider_label, 7,0)
         self.edit_buttons_layout.addWidget(self.threshold_slider_value, 7,1)
         self.edit_buttons_layout.addWidget(self.threshold_slider, 8,0,1,2)
-        self.edit_buttons_layout.addWidget(self.drop_brush_button, 9,0,1,2)
-        self.edit_buttons_layout.addWidget(self.stop_editing_button, 10,0,1,2)
-        self.edit_buttons_layout.setRowStretch(11,1)  
+        #self.edit_buttons_layout.addWidget(self.drop_brush_button, 9,0,1,2)
+        self.edit_buttons_layout.addWidget(self.stop_editing_button, 9,0,1,2)
+        self.edit_buttons_layout.setRowStretch(10,1)  # (11,1)  
 
         self.top_layout = QHBoxLayout(self)
         self.top_layout.addLayout(self.slice_view_layout)
@@ -395,6 +396,7 @@ class SegmentationModuleTab(QWidget):
         self.slice_view.renderer.RemoveActor(self.lumen_outline_actor2D)
         self.slice_view.renderer.RemoveActor(self.plaque_outline_actor2D)
         self.slice_view.renderer.AddActor(self.mask_slice_actor)
+        self.slice_view.interactor_style.SetCurrentImageNumber(0)
         self.slice_view.GetRenderWindow().Render()
       
         
@@ -402,14 +404,17 @@ class SegmentationModuleTab(QWidget):
         # disable all buttons and remove all actors for editing, enable editing again
         self.editing_active = False
         self.endDrawMode()
+        self.brush_button.setVisible(True)
         self.brush_button.setEnabled(False)
-        self.brush_button.setEnabled(False)
+        self.drop_brush_button.setVisible(False)
         self.edit_button.setEnabled(True)
         self.stop_editing_button.setEnabled(False)
         self.slice_view.renderer.AddActor(self.lumen_outline_actor2D)
         self.slice_view.renderer.AddActor(self.plaque_outline_actor2D)
         self.slice_view.renderer.RemoveActor(self.mask_slice_actor)
         self.slice_view.GetRenderWindow().Render()
+        #self.model_view.padding.SetInputData(self.label_map)
+        #self.model_view.GetRenderWindow().Render()
         
     
     def brushSizeChanged(self, brush_size): 
@@ -513,7 +518,7 @@ class SegmentationModuleTab(QWidget):
         self.brush_active = True  
         self.pickEvent = self.slice_view.interactor_style.AddObserver("MouseMoveEvent", self.pickPosition) 
         self.startEvent = self.slice_view.interactor_style.AddObserver("LeftButtonPressEvent", self.start_draw) 
-        self.brush_button.setEnabled(False)
+        self.brush_button.setVisible(False)
         self.brush_2D.setEnabled(True)
         self.brush_3D.setEnabled(True)
         self.auto_update_box.setEnabled(True)
@@ -525,14 +530,14 @@ class SegmentationModuleTab(QWidget):
         self.threshold_slider.setEnabled(True)
         self.threshold_slider_label.setEnabled(True)
         self.threshold_slider_value.setEnabled(True)
-        self.drop_brush_button.setEnabled(True)
+        self.drop_brush_button.setVisible(True)
         self.slice_view.renderer.AddActor(self.circle_actor) 
         self.thresholdChanged(self.threshold)  
         self.slice_view.GetRenderWindow().Render()
     
     def endDrawMode(self):
-        self.brush_button.setEnabled(True)
-        self.drop_brush_button.setEnabled(False)
+        self.brush_button.setVisible(True)
+        self.drop_brush_button.setVisible(False)
         self.brush_2D.setEnabled(False)
         self.brush_3D.setEnabled(False)
         self.auto_update_box.setEnabled(False)
