@@ -9,13 +9,13 @@ from vtk.util.numpy_support import vtk_to_numpy, numpy_to_vtk
 from PyQt5.QtCore import Qt, pyqtSignal
 from PyQt5.QtWidgets import  (
     QWidget, QVBoxLayout, QHBoxLayout, QSlider, QTabWidget,
-    QPushButton, QMessageBox, QGridLayout, QLabel, QCheckBox
+    QPushButton, QMessageBox, QGridLayout, QLabel, QCheckBox, QToolBar, QAction
 )
 
 from modules.Interactors import ImageSliceInteractor, IsosurfaceInteractor
 from defaults import *
 
-class SegmentationModuleTab(QWidget):  # (QTabWidget):
+class SegmentationModuleTab(QWidget):  
     """
     Tab view of a right OR left side carotid for segmentation.
     """
@@ -35,88 +35,93 @@ class SegmentationModuleTab(QWidget):  # (QTabWidget):
         self.lumen_pending = True        # True if not lumen pixels exist yet
         self.model_camera_pending = True # True if camera of model_view has not been set yet
         self.editing_active = False      # True if label map editing is active
-        self.brush_active = False        # True if brush/drawing is active  # temporary fix
         self.brush_size = 15             # size of brush on label map
         self.threshold = 0               # value of threshold for drawing with brush 
         self.draw3D = False              # dimension of brush (2/3D) 
-        self.eraser = False               # use of eraser or brush 
+        self.eraser = False              # use of eraser or brush 
 
         # on-screen objects
         self.slice_view = ImageSliceInteractor(self)
         self.slice_view_slider = QSlider(Qt.Horizontal)
+        self.slice_view_slider_label = QLabel("Slice")
+        self.slice_view_slider.setEnabled(False)
+        self.slice_view_slider_label.setEnabled(False)
+
         self.model_view = IsosurfaceInteractor(self)
-        #self.brush_tab = QWidget()
-        self.CNN_button = QPushButton("New Segmentation: Initialize with CNN")
-        self.edit_button = QPushButton("Edit Segmentation")  
-        self.brush_button = QPushButton("Brush") 
-        self.brush_2D = QPushButton("2D") 
-        self.brush_3D = QPushButton("3D")
-        self.auto_update_box = QCheckBox("auto-update")
-        self.lumen_button = QPushButton("Lumen")
-        self.plaque_button = QPushButton("Plaque")
+        self.CNN_button = QPushButton("New Segmentation: Initialize with CNN") # für button in Toolbar: self.toolbarCNN  
+
+        # define sliders
         self.brush_size_slider = QSlider(Qt.Horizontal)  
         self.brush_size_slider.setMinimum(1)
         self.brush_size_slider.setMaximum(51)
         self.brush_size_slider.setSingleStep(2)
         self.brush_size_slider.setValue(self.brush_size)
         self.brush_size_slider.setTickInterval(1)
-        self.brush_slider_label = QLabel()
-        self.brush_slider_label.setText("Brush/Eraser Size") 
+        self.brush_slider_label = QLabel("Brush/Eraser Size")
+        self.brush_size_slider.setEnabled(False)
+        self.brush_slider_label.setEnabled(False) 
         self.threshold_slider = QSlider(Qt.Horizontal) 
         self.threshold_slider.setSingleStep(1)  
         self.threshold_slider.setTickInterval(1)  
-        self.threshold_slider_label = QLabel()
-        self.threshold_slider_label.setText("Threshold: ")  
-        self.threshold_slider_value = QLabel()
-        self.threshold_slider_value.setText(str(self.threshold))
-        self.drop_brush_button = QPushButton("Drop Brush")
-        self.stop_editing_button = QPushButton("Stop Editing")
-
-        self.edit_button.setEnabled(False)
-        self.brush_button.setEnabled(False)
-        self.brush_2D.setEnabled(False) 
-        self.brush_3D.setEnabled(False)
-        self.auto_update_box.setEnabled(False)
-        self.auto_update_box.setChecked(True) 
-        self.stop_editing_button.setEnabled(False)
-        self.lumen_button.setEnabled(False)
-        self.plaque_button.setEnabled(False)
-        self.brush_size_slider.setEnabled(False)
-        self.brush_slider_label.setEnabled(False)
+        self.threshold_slider_label = QLabel("Threshold: "+ str(self.threshold))
         self.threshold_slider.setEnabled(False)
         self.threshold_slider_label.setEnabled(False)
-        self.threshold_slider_value.setEnabled(False)
-        self.drop_brush_button.setVisible(False)
+        
+        # add sliders to grid
+        self.slider_layout = QGridLayout()
+        self.slider_layout.addWidget(self.brush_slider_label, 0,0,1,2)
+        self.slider_layout.addWidget(self.threshold_slider_label,1,0,1,2)
+        self.slider_layout.addWidget(self.slice_view_slider_label, 2,0,1,2)
+        self.slider_layout.setColumnStretch(2, 4)
+        self.slider_layout.addWidget(self.brush_size_slider, 0,2)
+        self.slider_layout.addWidget(self.threshold_slider,1,2)
+        self.slider_layout.addWidget(self.slice_view_slider,2,2)
+
+        # actions for toolbar
+        #self.toolbar_CNN = QAction("New Segmentation: Initialize with CNN")
+        self.toolbar_edit = QAction("Edit Segmenation", self)
+        self.toolbar_edit.setEnabled(False)
+        self.toolbar_edit.setCheckable(True)
+        self.toolbar_lumen = QAction("Lumen", self)
+        self.toolbar_lumen.setCheckable(True)
+        self.toolbar_lumen.setEnabled(False)
+        self.toolbar_plaque = QAction("Plaque", self)
+        self.toolbar_plaque.setCheckable(True)
+        self.toolbar_plaque.setEnabled(False)
+        self.toolbar_brush2D = QAction("2D", self)
+        self.toolbar_brush2D.setCheckable(True)
+        self.toolbar_brush2D.setEnabled(False)
+        self.toolbar_brush3D = QAction("3D", self)
+        self.toolbar_brush3D.setCheckable(True)
+        self.toolbar_brush3D.setEnabled(False)
+        self.toolbar_auto_update = QAction("auto-update")
+        self.toolbar_auto_update.setCheckable(True)
+        self.toolbar_auto_update.setEnabled(False)
+
+        # set toolbar
+        self.edit_toolbar = QToolBar()
+        #self.edit_toolbar.addAction(self.toolbar_CNN)
+        #self.edit_toolbar.addSeparator()
+        self.edit_toolbar.addAction(self.toolbar_edit)
+        self.edit_toolbar.addSeparator()
+        self.edit_toolbar.addAction(self.toolbar_lumen)
+        self.edit_toolbar.addAction(self.toolbar_plaque)
+        self.edit_toolbar.addSeparator()
+        self.edit_toolbar.addAction(self.toolbar_brush2D)
+        self.edit_toolbar.addAction(self.toolbar_brush3D)
+        self.edit_toolbar.addSeparator()
+        self.edit_toolbar.addAction(self.toolbar_auto_update)
 
 
-        # add everything to a layout
+        # add everything to a layou
         self.slice_view_layout = QVBoxLayout()
         self.slice_view_layout.addWidget(self.CNN_button)
-        self.slice_view_layout.addWidget(self.edit_button)
-        self.slice_view_layout.addWidget(self.slice_view_slider)
+        self.slice_view_layout.addWidget(self.edit_toolbar)
+        self.slice_view_layout.addLayout(self.slider_layout)
         self.slice_view_layout.addWidget(self.slice_view)
-
-        self.edit_buttons_layout = QGridLayout()
-        self.edit_buttons_layout.setVerticalSpacing(30)  
-        self.edit_buttons_layout.addWidget(self.brush_button, 0,0,1,2) 
-        self.edit_buttons_layout.addWidget(self.drop_brush_button, 0,0,1,2)
-        self.edit_buttons_layout.addWidget(self.brush_2D, 1,0)
-        self.edit_buttons_layout.addWidget(self.brush_3D, 1,1)
-        self.edit_buttons_layout.addWidget(self.auto_update_box, 2,0,1,2)
-        self.edit_buttons_layout.addWidget(self.lumen_button, 3,0)
-        self.edit_buttons_layout.addWidget(self.plaque_button, 3,1)
-        self.edit_buttons_layout.addWidget(self.brush_slider_label, 5,0,1,2)
-        self.edit_buttons_layout.addWidget(self.brush_size_slider, 6,0,1,2)
-        self.edit_buttons_layout.addWidget(self.threshold_slider_label, 7,0)
-        self.edit_buttons_layout.addWidget(self.threshold_slider_value, 7,1)
-        self.edit_buttons_layout.addWidget(self.threshold_slider, 8,0,1,2)
-        #self.edit_buttons_layout.addWidget(self.drop_brush_button, 9,0,1,2)
-        self.edit_buttons_layout.addWidget(self.stop_editing_button, 9,0,1,2)
-        self.edit_buttons_layout.setRowStretch(10,1)  # (11,1)  
 
         self.top_layout = QHBoxLayout(self)
         self.top_layout.addLayout(self.slice_view_layout)
-        self.top_layout.addLayout(self.edit_buttons_layout)
         self.top_layout.addWidget(self.model_view)
         
 
@@ -131,20 +136,18 @@ class SegmentationModuleTab(QWidget):  # (QTabWidget):
 
         # connect signals/slots
         self.CNN_button.pressed.connect(self.generateCNNSeg)
+        #self.toolbar_CNN.triggered.connect(self.generateCNNSeg)
         self.slice_view.slice_changed[int].connect(self.sliceChanged)
         self.slice_view_slider.valueChanged[int].connect(self.slice_view.setSlice)
-        self.edit_button.pressed.connect(self.activateEditing)
-        self.brush_button.pressed.connect(self.drawMode)  
-        self.brush_2D.pressed.connect(self.set2DBrush)
-        self.brush_3D.pressed.connect(self.set3DBrush)
+        self.toolbar_edit.triggered[bool].connect(self.edit)
+        self.toolbar_brush2D.triggered[bool].connect(self.set2DBrush)
+        self.toolbar_brush3D.triggered[bool].connect(self.set3DBrush)
         self.brush_size_slider.valueChanged[int].connect(self.brushSizeChanged)
         self.threshold_slider.valueChanged[int].connect(self.thresholdChanged)
         self.threshold_slider.sliderPressed.connect(self.showThreshold)
         self.threshold_slider.sliderReleased.connect(self.hideThreshold)
-        self.stop_editing_button.pressed.connect(self.deactivateEditing)
-        self.drop_brush_button.pressed.connect(self.endDrawMode)
-        self.lumen_button.pressed.connect(self.setColorLumen)  
-        self.plaque_button.pressed.connect(self.setColorPlaque)
+        self.toolbar_lumen.triggered[bool].connect(self.setColorLumen) 
+        self.toolbar_plaque.triggered[bool].connect(self.setColorPlaque)
 
         # initialize VTK
         self.slice_view.Initialize()
@@ -237,7 +240,7 @@ class SegmentationModuleTab(QWidget):  # (QTabWidget):
         self.mask_slice_mapper.SetSliceNumber(slice_nr)
         self.threshold_mapper.SetSliceNumber(slice_nr)
         # check what to update 
-        if self.auto_update_box.isChecked():
+        if self.toolbar_auto_update.isChecked():
             self.model_view.GetRenderWindow().Render()
         else: 
             self.slice_view.GetRenderWindow().Render()
@@ -263,12 +266,14 @@ class SegmentationModuleTab(QWidget):  # (QTabWidget):
                 self.image = self.slice_view.loadNrrd(volume_file)
                 self.__loadImageData()
                 self.brush_size = abs(self.image.GetSpacing()[0]*self.brush_size)  
-                self.edit_button.setEnabled(True)
+                self.toolbar_edit.setEnabled(True)
                 self.slice_view_slider.setRange(
                     self.slice_view.min_slice,
                     self.slice_view.max_slice
                 )
                 self.slice_view_slider.setSliderPosition(self.slice_view.slice)  
+                self.slice_view_slider.setEnabled(True)
+                self.slice_view_slider_label.setEnabled(True)
                 
 
             # image exists -> load segmentation
@@ -296,7 +301,13 @@ class SegmentationModuleTab(QWidget):  # (QTabWidget):
                 vtk_data_array = numpy_to_vtk(self.label_map_data.ravel(order='F'))
                 self.label_map.GetPointData().SetScalars(vtk_data_array)
                 self.masks_color_mapped.SetInputData(self.label_map)
-                
+
+            # initialize brush 
+            self.toolbar_lumen.trigger()
+            self.toolbar_brush2D.trigger() 
+            self.thresholdChanged(self.threshold) 
+            self.toolbar_auto_update.setChecked(True) 
+
             # draw scene
             self.slice_view.GetRenderWindow().Render()
             self.model_view.GetRenderWindow().Render()
@@ -314,6 +325,9 @@ class SegmentationModuleTab(QWidget):  # (QTabWidget):
             self.threshold_img = None
             self.deactivateEditing()
             self.edit_button.setEnabled(False)
+            self.toolbar_edit.setEnabled(False)
+            self.slice_view_slider.setEnabled(False)
+            self.slice_view_slider_label.setEnabled(False)
             self.model_view.renderer.RemoveActor(self.lumen_outline_actor3D)
             self.slice_view.renderer.RemoveActor(self.lumen_outline_actor2D)
             self.model_view.renderer.RemoveActor(self.plaque_outline_actor3D)
@@ -365,7 +379,6 @@ class SegmentationModuleTab(QWidget):  # (QTabWidget):
         self.threshold_img.SetOrigin(position)
         self.threshold_img.SetSpacing(spacing)
 
-        # load pixel values of image and rescale to [0,255]
         self.image_data = vtk_to_numpy(self.image.GetPointData().GetScalars())
         self.image_data = self.image_data.reshape(shape, order='F')
         min, max = self.image_data.min(), self.image_data.max()
@@ -380,17 +393,32 @@ class SegmentationModuleTab(QWidget):  # (QTabWidget):
         circle.GeneratePolygonOff()
         circle.SetNumberOfSides(20)
         return circle
+    
+    def edit(self, on:bool):
+        if on: 
+            self.activateEditing()
+        else: 
+            self.deactivateEditing()
 
-
-    def activateEditing(self): 
-        # enable all buttons that are needed for editing
-        self.brush_button.setEnabled(True)
-        self.stop_editing_button.setEnabled(True)
-        self.edit_button.setEnabled(False)
-        self.setColorLumen()  
-        self.set2DBrush()
+    def activateEditing(self):
+        # enable all buttons needed for editing
+        self.toolbar_lumen.setEnabled(True)
+        self.toolbar_plaque.setEnabled(True)
+        self.toolbar_brush2D.setEnabled(True)
+        self.toolbar_brush3D.setEnabled(True)
+        self.toolbar_auto_update.setEnabled(True)
+        self.brush_size_slider.setEnabled(True)
+        self.brush_slider_label.setEnabled(True) 
+        self.threshold_slider.setEnabled(True)
+        self.threshold_slider_label.setEnabled(True)
+    
+        # set observers for drawing 
+        self.pickEvent = self.slice_view.interactor_style.AddObserver("MouseMoveEvent", self.pickPosition) 
+        self.startLeft = self.slice_view.interactor_style.AddObserver("LeftButtonPressEvent", self.start_draw) 
+        self.startRight = self.slice_view.interactor_style.AddObserver("RightButtonPressEvent", self.start_draw)
 
         # change scene
+        self.slice_view.renderer.AddActor(self.circle_actor) 
         self.slice_view.renderer.RemoveActor(self.lumen_outline_actor2D)
         self.slice_view.renderer.RemoveActor(self.plaque_outline_actor2D)
         self.slice_view.renderer.AddActor(self.mask_slice_actor)
@@ -400,13 +428,23 @@ class SegmentationModuleTab(QWidget):  # (QTabWidget):
         
     def deactivateEditing(self):
         # disable all buttons and remove all actors for editing, enable editing again
-        self.editing_active = False
-        self.endDrawMode()
-        self.brush_button.setVisible(True)
-        self.brush_button.setEnabled(False)
-        self.drop_brush_button.setVisible(False)
-        self.edit_button.setEnabled(True)
-        self.stop_editing_button.setEnabled(False)
+        self.brush_size_slider.setEnabled(False)
+        self.brush_slider_label.setEnabled(False)
+        self.threshold_slider.setEnabled(False)
+        self.threshold_slider_label.setEnabled(False)
+        self.toolbar_lumen.setEnabled(False)
+        self.toolbar_plaque.setEnabled(False)
+        self.toolbar_brush2D.setEnabled(False)
+        self.toolbar_brush3D.setEnabled(False)
+        self.toolbar_auto_update.setEnabled(False)
+
+        # remove observers for drawing, so that other observers work again 
+        self.slice_view.interactor_style.RemoveObserver(self.startLeft) 
+        self.slice_view.interactor_style.RemoveObserver(self.startRight) 
+        self.slice_view.interactor_style.RemoveObserver(self.pickEvent)
+
+        # change scene
+        self.slice_view.renderer.RemoveActor(self.circle_actor)
         self.slice_view.renderer.AddActor(self.lumen_outline_actor2D)
         self.slice_view.renderer.AddActor(self.plaque_outline_actor2D)
         self.slice_view.renderer.RemoveActor(self.mask_slice_actor)
@@ -439,24 +477,30 @@ class SegmentationModuleTab(QWidget):  # (QTabWidget):
         self.circle_mask = R.astype(np.bool_) 
         self.slice_view.GetRenderWindow().Render() 
 
-    def set2DBrush(self):
-        # set up 2D brush 
-        self.draw3D = False
+    def set2DBrush(self, on:bool):
+        if on:  # set up 2D brush 
+            self.draw3D = False
+            self.toolbar_brush3D.setChecked(False)
+
+        else:  # set up 3D brush if button clicked second time 
+            self.draw3D = True 
+            self.toolbar_brush3D.setChecked(True)
         self.brushSizeChanged(abs(round(self.brush_size/self.image.GetSpacing()[0])))
-        self.brush_2D.setStyleSheet("background-color: rgb(175,175,175)")
-        self.brush_3D.setStyleSheet("background-color: light gray")
         
-    def set3DBrush(self):
-        # set up 3D brush 
-        self.draw3D = True
-        self.brushSizeChanged(abs(round(self.brush_size/self.image.GetSpacing()[0])))
-        self.brush_3D.setStyleSheet("background-color: rgb(175,175,175)")
-        self.brush_2D.setStyleSheet("background-color: light gray")
+    def set3DBrush(self, on:bool):
+        
+        if on:  # set up 3D brush 
+            self.draw3D = True
+            self.toolbar_brush2D.setChecked(False)
+        else:
+            self.draw3D = False  # set up 2D brush if button clicked second time
+            self.toolbar_brush2D.setChecked(True)
+        self.brushSizeChanged(abs(round(self.brush_size/self.image.GetSpacing()[0])))    
 
 
     def thresholdChanged(self,threshold):
         self.threshold = threshold
-        self.threshold_slider_value.setText(str(self.threshold))  # update slider label 
+        self.threshold_slider_label.setText("Threshold: "+ str(self.threshold))  # update slider label 
 
         # get copy of pixel values 
         threshold_img_data = np.copy(self.image_data)
@@ -471,69 +515,32 @@ class SegmentationModuleTab(QWidget):  # (QTabWidget):
         # update scene 
         self.slice_view.GetRenderWindow().Render()
 
-    def showThreshold(self):
-        self.slice_view.renderer.AddActor(self.threshold_actor) 
+    # to show threshold only when slider moved
+    def showThreshold(self):  
+        self.slice_view.renderer.AddActor(self.threshold_actor)  
         self.slice_view.GetRenderWindow().Render()
 
-    def hideThreshold(self):
+    def hideThreshold(self): 
         self.slice_view.renderer.RemoveActor(self.threshold_actor)
-        self.slice_view.GetRenderWindow().Render()  # checkbox for option to show at all times?
+        self.slice_view.GetRenderWindow().Render()  
         
 
-    def setColorLumen(self):
-        self.draw_value = 2
-        self.lumen_button.setStyleSheet("background-color:rgb(216,101,79)")
-        self.plaque_button.setStyleSheet("background-color: light gray")
-        self.circle_actor.GetProperty().SetColor(COLOR_LUMEN)  # set color of circle to lumen 
+    def setColorLumen(self, on:bool):
+        if on:
+            self.draw_value = 2
+            self.circle_actor.GetProperty().SetColor(COLOR_LUMEN)  # set color of circle to lumen 
+            self.toolbar_plaque.setChecked(False)
+        else: 
+            self.toolbar_plaque.trigger()
 
-    def setColorPlaque(self):
-        self.draw_value = 1
-        self.lumen_button.setStyleSheet("background-color: light gray")
-        self.plaque_button.setStyleSheet("background-color: rgb(241,214,145)")
-        self.circle_actor.GetProperty().SetColor(COLOR_PLAQUE)  # set color of circle to plaque 
-    
+    def setColorPlaque(self, on:bool):
+        if on:
+            self.draw_value = 1
+            self.circle_actor.GetProperty().SetColor(COLOR_PLAQUE)  # set color of circle to plaque 
+            self.toolbar_lumen.setChecked(False)
+        else: 
+            self.toolbar_lumen.trigger()
 
-    def drawMode(self):
-        self.brush_active = True  
-        self.pickEvent = self.slice_view.interactor_style.AddObserver("MouseMoveEvent", self.pickPosition) 
-        self.startLeft = self.slice_view.interactor_style.AddObserver("LeftButtonPressEvent", self.start_draw) 
-        self.startRight = self.slice_view.interactor_style.AddObserver("RightButtonPressEvent", self.start_draw)
-        self.brush_button.setVisible(False)
-        self.brush_2D.setEnabled(True)
-        self.brush_3D.setEnabled(True)
-        self.auto_update_box.setEnabled(True)
-        self.lumen_button.setEnabled(True) 
-        self.plaque_button.setEnabled(True)
-        self.brush_size_slider.setEnabled(True)
-        self.brush_slider_label.setEnabled(True) 
-        self.threshold_slider.setEnabled(True)
-        self.threshold_slider_label.setEnabled(True)
-        self.threshold_slider_value.setEnabled(True)
-        self.drop_brush_button.setVisible(True)
-        self.slice_view.renderer.AddActor(self.circle_actor) 
-        self.thresholdChanged(self.threshold)  
-        self.slice_view.GetRenderWindow().Render()
-    
-    def endDrawMode(self):
-        self.brush_button.setVisible(True)
-        self.drop_brush_button.setVisible(False)
-        self.brush_2D.setEnabled(False)
-        self.brush_3D.setEnabled(False)
-        self.auto_update_box.setEnabled(False)
-        self.lumen_button.setEnabled(False)
-        self.plaque_button.setEnabled(False)
-        self.brush_size_slider.setEnabled(False)
-        self.brush_slider_label.setEnabled(False)
-        self.threshold_slider.setEnabled(False)
-        self.threshold_slider_label.setEnabled(False)
-        self.threshold_slider_value.setEnabled(False)
-        self.slice_view.renderer.RemoveActor(self.circle_actor)
-        if self.brush_active:
-            self.slice_view.interactor_style.RemoveObserver(self.startLeft) 
-            self.slice_view.interactor_style.RemoveObserver(self.startRight) 
-            self.slice_view.interactor_style.RemoveObserver(self.pickEvent)
-            self.slice_view.GetRenderWindow().Render() 
-        self.brush_active = False 
 
     def pickPosition(self, obj, event):
         # pick current mouse position
@@ -550,9 +557,11 @@ class SegmentationModuleTab(QWidget):  # (QTabWidget):
                               self.image.GetOrigin()[2]-self.image.GetExtent()[2])  # move circle if mouse moved 
         self.slice_view.GetRenderWindow().Render()
 
+
     def start_draw(self, obj, event):
-        if event == "RightButtonPressEvent":
+        if event == "RightButtonPressEvent": # check if left (-> brush) or right (-> eraser) mouse button pressed
             self.eraser = True 
+
         # draw first point at position clicked on
         self.draw(obj,event)
 
@@ -594,23 +603,33 @@ class SegmentationModuleTab(QWidget):  # (QTabWidget):
         if self.draw3D == False:
             # draw circle  
             mask = np.copy(self.circle_mask[x0-x+s:x1-x+s, y0-y+s:y1-y+s]) # crop circle mask at borders
+
+            # check if eraser or brush 
             if self.eraser: 
-                mask[self.label_map_data[x0:x1,y0:y1,z] != self.draw_value] = False 
+                # erase only current draw value 
+                mask[self.label_map_data[x0:x1,y0:y1,z] != self.draw_value] = False   
                 self.label_map_data[x0:x1,y0:y1,z][mask] = 0
             else:
-                threshold = self.threshold_mask[x0:x1,y0:y1,z]
+                # draw only if HU above threshold 
+                threshold = self.threshold_mask[x0:x1,y0:y1,z]  
                 mask = threshold & mask
                 self.label_map_data[x0:x1,y0:y1,z][mask] = self.draw_value
+
+
         else: 
             # draw sphere
             s_z = self.brush_z
             z0 = max(z-s_z, 0)
             z1 = min(z+s_z+1, self.label_map_data.shape[2])
             mask = np.copy(self.circle_mask[x0-x+s:x1-x+s, y0-y+s:y1-y+s, z0-z+s_z:z1-z+s_z]) # crop sphere mask at borders
+
+            # check if eraser or brush 
             if self.eraser: 
-                mask[self.label_map_data[x0:x1,y0:y1,z0:z1] != self.draw_value] = False
+                 # erase only current draw value
+                mask[self.label_map_data[x0:x1,y0:y1,z0:z1] != self.draw_value] = False  
                 self.label_map_data[x0:x1,y0:y1,z0:z1][mask] = 0
             else:
+                # draw only if HU above threshold
                 threshold = self.threshold_mask[x0:x1,y0:y1,z0:z1]
                 mask = threshold & mask
                 self.label_map_data[x0:x1,y0:y1,z0:z1][mask] = self.draw_value  
@@ -625,7 +644,7 @@ class SegmentationModuleTab(QWidget):  # (QTabWidget):
         self.slice_view.interactor_style.RemoveObserver(self.drawEvent)  
         self.slice_view.interactor_style.RemoveObserver(self.endEvent) 
 
-        if self.auto_update_box.isChecked():  # update if auto-update checkbox is checked
+        if self.toolbar_auto_update.isChecked():  # update if auto-update is checked
             self.model_view.padding.SetInputData(self.label_map)
             self.model_view.GetRenderWindow().Render()
 
