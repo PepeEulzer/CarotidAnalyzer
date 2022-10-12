@@ -1,10 +1,10 @@
 # Carotid Analyzer
 
-
+A full pipeline for cropping, segmentation, centerline computation, and interactive visualization of carotid artery geometries.
 
 ### Setup
 
-Dependencies
+Main dependencies
 - Python 3.6 (requirement for vmtk)
 - numpy 1.12
 - pyqt 5.9
@@ -12,31 +12,15 @@ Dependencies
 - vtk 8.1
 - vmtk 1.4
 
-Install using Anaconda
+Install using Anaconda:
 
 ```
 conda create -n CarotidAnalyzer -c vmtk python=3.6 pyqt numpy itk vtk vmtk
-```
-
-**Install CNN inference dependencies**
-For creating segmentation mask predictions with the CNN also install the following:
-
-Pytorch CUDA (with CUDA-enabled NVIDIA card)
-```
 conda activate CarotidAnalyzer
-conda install pytorch torchvision torchaudio cudatoolkit=11.3 -c pytorch
+conda install -c conda-forge pynrrd pyqtgraph
 ```
 
-**Or** Pytorch CPU
-```
-conda install pytorch torchvision torchaudio cpuonly -c pytorch
-```
-
-Monai, skimage, pynrrd
-```
-pip install monai
-conda install skimage pynrrd -c conda-forge
-```
+The main application can now be used and edited. Extension modules can also be developed and integrated. The following sections are only relevant if the core GUI (not the GUI of extension modules) needs to be changed or the segmentation CNN needs to be run.
 
 
 
@@ -68,3 +52,30 @@ pyrcc5.exe C:\Git\carotidanalyzer\ui\resources.qrc -o C:\Git\carotidanalyzer\res
 
 Adapt to your Git path. On other platforms, just use the `pyuic5`/`pyrcc5` commands (no .exe) with the CarotidAnalyzer environment active.
 
+
+
+#### Install CNN inference dependencies
+
+For creating segmentation mask predictions with the CNN install the following environment. Use a separate environment, as this requires Python >= 3.7 and thus does not work with the vmtk.
+
+Pytorch CUDA (with CUDA-enabled NVIDIA card):
+
+```
+conda create -n CarotidInference -c pytorch pytorch torchvision torchaudio cudatoolkit=11.3
+```
+
+> **Or** Pytorch CPU:
+>
+>```
+>conda install pytorch torchvision torchaudio cpuonly -c pytorch
+>```
+
+Then, install Monai, skimage, pynrrd:
+
+```
+conda activate CarotidInference
+pip install monai
+conda install -c conda-forge skimage pynrrd 
+```
+
+This allows using the *Inference.py* script, which updates the segmentation predictions in the database. It does not modify the segmentations visible to the user and is only used if a new prediction is requested (overwrites any current segmentation).
