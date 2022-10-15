@@ -1,6 +1,5 @@
 import os
 from collections import OrderedDict
-from turtle import position
 
 import numpy as np
 import nrrd
@@ -9,7 +8,7 @@ from vtk.util.numpy_support import vtk_to_numpy, numpy_to_vtk
 from PyQt5.QtCore import Qt, pyqtSignal
 from PyQt5.QtWidgets import  (
     QWidget, QVBoxLayout, QHBoxLayout, QSlider, QTabWidget,
-    QPushButton, QMessageBox, QGridLayout, QLabel, QCheckBox, QToolBar, QAction
+    QPushButton, QMessageBox, QGridLayout, QLabel, QToolBar, QAction, QSizePolicy
 )
 
 from modules.Interactors import ImageSliceInteractor, IsosurfaceInteractor
@@ -57,13 +56,13 @@ class SegmentationModuleTab(QWidget):
         self.brush_size_slider.setSingleStep(2)
         self.brush_size_slider.setValue(self.brush_size)
         self.brush_size_slider.setTickInterval(1)
-        self.brush_slider_label = QLabel("Brush/Eraser Size")
+        self.brush_slider_label = QLabel("Brush/Eraser Size         ")
         self.brush_size_slider.setEnabled(False)
         self.brush_slider_label.setEnabled(False) 
         self.threshold_slider = QSlider(Qt.Horizontal) 
         self.threshold_slider.setSingleStep(1)  
         self.threshold_slider.setTickInterval(1)  
-        self.threshold_slider_label = QLabel("Threshold: "+ str(self.threshold))
+        self.threshold_slider_label = QLabel("Threshold: "+ str(self.threshold) + " (HU)")
         self.threshold_slider.setEnabled(False)
         self.threshold_slider_label.setEnabled(False)
         
@@ -93,20 +92,24 @@ class SegmentationModuleTab(QWidget):
         self.toolbar_brush3D = QAction("3D", self)
         self.toolbar_brush3D.setCheckable(True)
         self.toolbar_brush3D.setEnabled(False)
-        self.toolbar_auto_update = QAction("auto-update")
+        self.toolbar_auto_update = QAction("auto-update 3D model")
         self.toolbar_auto_update.setCheckable(True)
         self.toolbar_auto_update.setEnabled(False)
+        spacer1 = QWidget()
+        spacer1.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
+        spacer2 = QWidget()
+        spacer2.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
 
         # set toolbar
         self.edit_toolbar = QToolBar()
         self.edit_toolbar.addAction(self.toolbar_edit)
-        self.edit_toolbar.addSeparator()
+        self.edit_toolbar.addWidget(spacer1)
         self.edit_toolbar.addAction(self.toolbar_lumen)
         self.edit_toolbar.addAction(self.toolbar_plaque)
         self.edit_toolbar.addSeparator()
         self.edit_toolbar.addAction(self.toolbar_brush2D)
         self.edit_toolbar.addAction(self.toolbar_brush3D)
-        self.edit_toolbar.addSeparator()
+        self.edit_toolbar.addWidget(spacer2)
         self.edit_toolbar.addAction(self.toolbar_auto_update)
 
 
@@ -133,7 +136,6 @@ class SegmentationModuleTab(QWidget):
 
         # connect signals/slots
         self.CNN_button.pressed.connect(self.generateCNNSeg)
-        #self.toolbar_CNN.triggered.connect(self.generateCNNSeg)
         self.slice_view.slice_changed[int].connect(self.sliceChanged)
         self.slice_view_slider.valueChanged[int].connect(self.slice_view.setSlice)
         self.toolbar_edit.triggered[bool].connect(self.edit)
@@ -499,7 +501,7 @@ class SegmentationModuleTab(QWidget):
 
     def thresholdChanged(self,threshold):
         self.threshold = threshold
-        self.threshold_slider_label.setText("Threshold: "+ str(self.threshold))  # update slider label 
+        self.threshold_slider_label.setText("Threshold: "+ str(self.threshold) + " (HU)")  # update slider label 
 
         # get copy of pixel values 
         threshold_img_data = np.copy(self.image_data)
