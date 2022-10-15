@@ -43,12 +43,12 @@ class SegmentationModuleTab(QWidget):
         # on-screen objects
         self.slice_view = ImageSliceInteractor(self)
         self.slice_view_slider = QSlider(Qt.Horizontal)
-        self.slice_view_slider_label = QLabel("Slice")
+        self.slice_view_slider_label = QLabel("Slice: " + str(self.slice_view.slice))
         self.slice_view_slider.setEnabled(False)
         self.slice_view_slider_label.setEnabled(False)
 
         self.model_view = IsosurfaceInteractor(self)
-        self.CNN_button = QPushButton("New Segmentation: Initialize with CNN") # für button in Toolbar: self.toolbarCNN  
+        self.CNN_button = QPushButton("New Segmentation: Initialize with CNN") 
 
         # define sliders
         self.brush_size_slider = QSlider(Qt.Horizontal)  
@@ -78,7 +78,6 @@ class SegmentationModuleTab(QWidget):
         self.slider_layout.addWidget(self.slice_view_slider,2,2)
 
         # actions for toolbar
-        #self.toolbar_CNN = QAction("New Segmentation: Initialize with CNN")
         self.toolbar_edit = QAction("Edit Segmenation", self)
         self.toolbar_edit.setEnabled(False)
         self.toolbar_edit.setCheckable(True)
@@ -100,8 +99,6 @@ class SegmentationModuleTab(QWidget):
 
         # set toolbar
         self.edit_toolbar = QToolBar()
-        #self.edit_toolbar.addAction(self.toolbar_CNN)
-        #self.edit_toolbar.addSeparator()
         self.edit_toolbar.addAction(self.toolbar_edit)
         self.edit_toolbar.addSeparator()
         self.edit_toolbar.addAction(self.toolbar_lumen)
@@ -237,6 +234,7 @@ class SegmentationModuleTab(QWidget):
 
     def sliceChanged(self, slice_nr):
         self.slice_view_slider.setSliderPosition(slice_nr)
+        self.slice_view_slider_label.setText("Slice: " + str(self.slice_view.slice))  # update slider label 
         self.mask_slice_mapper.SetSliceNumber(slice_nr)
         self.threshold_mapper.SetSliceNumber(slice_nr)
         # check what to update 
@@ -478,6 +476,7 @@ class SegmentationModuleTab(QWidget):
         self.slice_view.GetRenderWindow().Render() 
 
     def set2DBrush(self, on:bool):
+        
         if on:  # set up 2D brush 
             self.draw3D = False
             self.toolbar_brush3D.setChecked(False)
