@@ -17,3 +17,7 @@ SYM_YES = "\u2714"
 SYM_NO = "\u2716"
 SYM_ENDASH = "\u2013"
 SYM_UNSAVED_CHANGES = "\u25CF"
+
+# global execution flags
+EXPAND_PATIENTS = False
+SHOW_MODEL_MISMATCH_WARNING = True

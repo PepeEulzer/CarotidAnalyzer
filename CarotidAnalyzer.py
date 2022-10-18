@@ -173,8 +173,9 @@ class CarotidAnalyzer(QMainWindow, Ui_MainWindow):
         self.tree_widget_data.resizeColumnToContents(1)
         self.tree_widget_data.resizeColumnToContents(2)
 
-        for i in range(self.tree_widget_data.topLevelItemCount()):
-            self.tree_widget_data.topLevelItem(i).setExpanded(False)
+        if not EXPAND_PATIENTS:
+            for i in range(self.tree_widget_data.topLevelItemCount()):
+                self.tree_widget_data.topLevelItem(i).setExpanded(False)
         
     
     def openWorkingDirDialog(self):
@@ -221,7 +222,8 @@ class CarotidAnalyzer(QMainWindow, Ui_MainWindow):
                 self.segmentation_module.loadPatient(patient)
                 self.centerline_module.loadPatient(patient)
                 self.stenosis_classifier.loadPatient(patient)
-                self.__checkSegMatchesModels()
+                if SHOW_MODEL_MISMATCH_WARNING:
+                    self.__checkSegMatchesModels()
                 break
 
 

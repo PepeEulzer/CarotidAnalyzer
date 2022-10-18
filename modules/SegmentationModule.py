@@ -321,8 +321,8 @@ class SegmentationModuleTab(QWidget):
             self.label_map = None
             self.label_map_data = None
             self.threshold_img = None
-            self.deactivateEditing()
-            self.edit_button.setEnabled(False)
+            if self.editing_active:
+                self.deactivateEditing()
             self.toolbar_edit.setEnabled(False)
             self.slice_view_slider.setEnabled(False)
             # self.slice_view_slider_label.setEnabled(False)
@@ -399,6 +399,8 @@ class SegmentationModuleTab(QWidget):
             self.deactivateEditing()
 
     def activateEditing(self):
+        self.editing_active = True
+
         # enable all buttons needed for editing
         self.toolbar_lumen.setEnabled(True)
         self.toolbar_plaque.setEnabled(True)
@@ -425,6 +427,8 @@ class SegmentationModuleTab(QWidget):
       
         
     def deactivateEditing(self):
+        self.editing_active = False
+
         # disable all buttons and remove all actors for editing, enable editing again
         self.brush_size_slider.setVisible(False)
         self.brush_slider_label.setVisible(False)
