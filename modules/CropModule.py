@@ -84,8 +84,8 @@ class CropModule(QWidget):
         self.button_layout.addWidget(self.button_set_left)
         self.slice_view_layout = QVBoxLayout()
         self.slice_view_layout.addLayout(self.button_layout)
-        self.slice_view_layout.addWidget(self.slice_view_slider)
         self.slice_view_layout.addWidget(self.slice_view)
+        self.slice_view_layout.addWidget(self.slice_view_slider)
         self.top_layout = QHBoxLayout(self)
         self.top_layout.addLayout(self.slice_view_layout)
         self.top_layout.addWidget(self.volume_view)
@@ -318,6 +318,7 @@ class CropModule(QWidget):
         # set the volume image in both views
         self.volume_view.setImage(self.image)
         self.slice_view.setImage(self.image)
+        self.slice_view.text_patient.SetInput(os.path.basename(patient_dict['volume_raw'])[:-5])
         self.slice_view_slider.setRange(
             self.slice_view.min_slice,
             self.slice_view.max_slice

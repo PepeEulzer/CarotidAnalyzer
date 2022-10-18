@@ -240,7 +240,16 @@ class CarotidAnalyzer(QMainWindow, Ui_MainWindow):
         for models in [[seg_model_left, cen_model_left], [seg_model_right, cen_model_right]]:
             p0 = models[0].GetNumberOfPoints()
             p1 = models[1].GetNumberOfPoints()
-            if p0 != p1:
+            if abs(p0 - p1) > 10:
+                match = False
+                break
+
+            center0 = models[0].GetCenter()
+            center1 = models[1].GetCenter()
+            distance = abs(center0[0] - center1[0] +
+                           center0[1] - center1[1] +
+                           center0[2] - center1[2])
+            if distance > 0.01:
                 match = False
                 break
         

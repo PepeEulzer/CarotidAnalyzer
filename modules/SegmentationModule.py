@@ -31,20 +31,20 @@ class SegmentationModuleTab(QWidget):
         self.volume_file = False         # path to CTA volume file
         self.pred_file = False           # path to CNN segmentation prediction file
         self.plaque_pending = True       # True if no plaque pixels exist yet
-        self.lumen_pending = True        # True if not lumen pixels exist yet
+        self.lumen_pending = True        # True if no lumen pixels exist yet
         self.model_camera_pending = True # True if camera of model_view has not been set yet
         self.editing_active = False      # True if label map editing is active
         self.brush_size = 15             # size of brush on label map
         self.threshold = 0               # value of threshold for drawing with brush 
-        self.draw3D = False              # dimension of brush (2/3D) 
+        self.draw3D = False              # dimension of brush (2D/3D) 
         self.eraser = False              # use of eraser or brush 
 
         # on-screen objects
         self.slice_view = ImageSliceInteractor(self)
         self.slice_view_slider = QSlider(Qt.Horizontal)
-        self.slice_view_slider_label = QLabel("Slice")
         self.slice_view_slider.setEnabled(False)
-        self.slice_view_slider_label.setEnabled(False)
+        #self.slice_view_slider_label = QLabel("Slice")
+        # self.slice_view_slider_label.setEnabled(False)
 
         self.model_view = IsosurfaceInteractor(self)
         self.CNN_button = QPushButton("New Segmentation: Initialize with CNN") # für button in Toolbar: self.toolbarCNN  
@@ -57,24 +57,24 @@ class SegmentationModuleTab(QWidget):
         self.brush_size_slider.setValue(self.brush_size)
         self.brush_size_slider.setTickInterval(1)
         self.brush_slider_label = QLabel("Brush/Eraser Size         ")
-        self.brush_size_slider.setEnabled(False)
-        self.brush_slider_label.setEnabled(False) 
+        self.brush_size_slider.setVisible(False)
+        self.brush_slider_label.setVisible(False)
         self.threshold_slider = QSlider(Qt.Horizontal) 
         self.threshold_slider.setSingleStep(1)  
         self.threshold_slider.setTickInterval(1)  
         self.threshold_slider_label = QLabel("Threshold: "+ str(self.threshold) + " (HU)")
-        self.threshold_slider.setEnabled(False)
-        self.threshold_slider_label.setEnabled(False)
+        self.threshold_slider.setVisible(False)
+        self.threshold_slider_label.setVisible(False)
         
         # add sliders to grid
         self.slider_layout = QGridLayout()
         self.slider_layout.addWidget(self.brush_slider_label, 0,0,1,2)
         self.slider_layout.addWidget(self.threshold_slider_label,1,0,1,2)
-        self.slider_layout.addWidget(self.slice_view_slider_label, 2,0,1,2)
+        # self.slider_layout.addWidget(self.slice_view_slider_label, 2,0,1,2)
         self.slider_layout.setColumnStretch(2, 4)
         self.slider_layout.addWidget(self.brush_size_slider, 0,2)
         self.slider_layout.addWidget(self.threshold_slider,1,2)
-        self.slider_layout.addWidget(self.slice_view_slider,2,2)
+        # self.slider_layout.addWidget(self.slice_view_slider,2,2)
 
         # actions for toolbar
         #self.toolbar_CNN = QAction("New Segmentation: Initialize with CNN")
@@ -113,19 +113,18 @@ class SegmentationModuleTab(QWidget):
         self.edit_toolbar.addWidget(spacer2)
         self.edit_toolbar.addAction(self.toolbar_auto_update)
 
-
-        # add everything to a layou
+        # add everything to a layout
         self.slice_view_layout = QVBoxLayout()
         self.slice_view_layout.addWidget(self.CNN_button)
         self.slice_view_layout.addWidget(self.edit_toolbar)
         self.slice_view_layout.addLayout(self.slider_layout)
         self.slice_view_layout.addWidget(self.slice_view)
+        self.slice_view_layout.addWidget(self.slice_view_slider)
 
         self.top_layout = QHBoxLayout(self)
         self.top_layout.addLayout(self.slice_view_layout)
         self.top_layout.addWidget(self.model_view)
         
-
         # vtk objects
         self.lumen_outline_actor3D, self.lumen_outline_actor2D = self.__createOutlineActors(
             self.model_view.smoother_lumen.GetOutputPort(), COLOR_LUMEN_DARK, COLOR_LUMEN)
@@ -133,7 +132,6 @@ class SegmentationModuleTab(QWidget):
             self.model_view.smoother_plaque.GetOutputPort(), COLOR_PLAQUE_DARK, COLOR_PLAQUE)
         self.__setupLUT()  # setup lookup table to display masks and threshold 
         self.__setupEditingPipeline()
-
 
         # connect signals/slots
         self.CNN_button.pressed.connect(self.generateCNNSeg)
@@ -273,7 +271,7 @@ class SegmentationModuleTab(QWidget):
                 )
                 self.slice_view_slider.setSliderPosition(self.slice_view.slice)  
                 self.slice_view_slider.setEnabled(True)
-                self.slice_view_slider_label.setEnabled(True)
+                # self.slice_view_slider_label.setEnabled(True)
                 
 
             # image exists -> load segmentation
@@ -327,7 +325,7 @@ class SegmentationModuleTab(QWidget):
             self.edit_button.setEnabled(False)
             self.toolbar_edit.setEnabled(False)
             self.slice_view_slider.setEnabled(False)
-            self.slice_view_slider_label.setEnabled(False)
+            # self.slice_view_slider_label.setEnabled(False)
             self.model_view.renderer.RemoveActor(self.lumen_outline_actor3D)
             self.slice_view.renderer.RemoveActor(self.lumen_outline_actor2D)
             self.model_view.renderer.RemoveActor(self.plaque_outline_actor3D)
@@ -407,10 +405,10 @@ class SegmentationModuleTab(QWidget):
         self.toolbar_brush2D.setEnabled(True)
         self.toolbar_brush3D.setEnabled(True)
         self.toolbar_auto_update.setEnabled(True)
-        self.brush_size_slider.setEnabled(True)
-        self.brush_slider_label.setEnabled(True) 
-        self.threshold_slider.setEnabled(True)
-        self.threshold_slider_label.setEnabled(True)
+        self.brush_size_slider.setVisible(True)
+        self.brush_slider_label.setVisible(True) 
+        self.threshold_slider.setVisible(True)
+        self.threshold_slider_label.setVisible(True)
     
         # set observers for drawing 
         self.pickEvent = self.slice_view.interactor_style.AddObserver("MouseMoveEvent", self.pickPosition) 
@@ -428,10 +426,10 @@ class SegmentationModuleTab(QWidget):
         
     def deactivateEditing(self):
         # disable all buttons and remove all actors for editing, enable editing again
-        self.brush_size_slider.setEnabled(False)
-        self.brush_slider_label.setEnabled(False)
-        self.threshold_slider.setEnabled(False)
-        self.threshold_slider_label.setEnabled(False)
+        self.brush_size_slider.setVisible(False)
+        self.brush_slider_label.setVisible(False)
+        self.threshold_slider.setVisible(False)
+        self.threshold_slider_label.setVisible(False)
         self.toolbar_lumen.setEnabled(False)
         self.toolbar_plaque.setEnabled(False)
         self.toolbar_brush2D.setEnabled(False)
