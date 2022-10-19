@@ -101,6 +101,7 @@ class CenterlineModuleTab(QWidget):
             self.lumen_active = True
             self.text_patient.SetInput(os.path.basename(lumen_file)[:-4])
             if centerline_file:
+                self.reader_centerline.SetFileName("")
                 self.reader_centerline.SetFileName(centerline_file)
                 self.mapper_centerline.SetInputConnection(self.reader_centerline.GetOutputPort())
                 self.renderer.AddActor(self.actor_centerline)

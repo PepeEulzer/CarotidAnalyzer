@@ -299,6 +299,10 @@ class SegmentationModuleTab(QWidget):
                 vtk_data_array = numpy_to_vtk(self.label_map_data.ravel(order='F'))
                 self.label_map.GetPointData().SetScalars(vtk_data_array)
                 self.masks_color_mapped.SetInputData(self.label_map)
+                self.model_view.renderer.RemoveActor(self.lumen_outline_actor3D)
+                self.slice_view.renderer.RemoveActor(self.lumen_outline_actor2D)
+                self.model_view.renderer.RemoveActor(self.plaque_outline_actor3D)
+                self.slice_view.renderer.RemoveActor(self.plaque_outline_actor2D)
 
             # initialize brush 
             self.toolbar_lumen.trigger()
@@ -570,11 +574,13 @@ class SegmentationModuleTab(QWidget):
         # check if pipeline needs updates
         if self.plaque_pending and self.draw_value == 1.0:
             self.model_view.renderer.AddActor(self.model_view.actor_plaque)
+            self.model_view.renderer.AddActor(self.plaque_outline_actor3D)
             self.model_view.renderer.ResetCamera()
             self.plaque_pending = False
             self.slice_view.GetRenderWindow().Render()
         elif self.lumen_pending and self.draw_value == 2.0:
             self.model_view.renderer.AddActor(self.model_view.actor_lumen)
+            self.model_view.renderer.AddActor(self.lumen_outline_actor3D)
             self.model_view.renderer.ResetCamera()
             self.lumen_pending = False
             self.slice_view.GetRenderWindow().Render()
