@@ -37,6 +37,7 @@ class SegmentationModuleTab(QWidget):
         self.brush_size = 15             # size of brush on label map
         self.threshold = 0               # value of threshold for drawing with brush 
         self.draw3D = False              # dimension of brush (2/3D) 
+        self.marker = False              # show marker in 3D
         self.eraser = False              # use of eraser or brush 
 
         # on-screen objects
@@ -141,6 +142,7 @@ class SegmentationModuleTab(QWidget):
         self.toolbar_edit.triggered[bool].connect(self.edit)
         self.toolbar_brush2D.triggered[bool].connect(self.set2DBrush)
         self.toolbar_brush3D.triggered[bool].connect(self.set3DBrush)
+        self.toolbar_auto_update.triggered[bool].connect(self.markerVisible)
         self.brush_size_slider.valueChanged[int].connect(self.brushSizeChanged)
         self.threshold_slider.valueChanged[int].connect(self.thresholdChanged)
         self.threshold_slider.sliderPressed.connect(self.showThreshold)
@@ -210,12 +212,26 @@ class SegmentationModuleTab(QWidget):
         self.mask_slice_actor.SetMapper(self.mask_slice_mapper)
         self.mask_slice_actor.InterpolateOff()
     
-        # circle/sphere around mouse when drawing 
-        self.circle = self.setUpCircle()
+        # circle around mouse when drawing 
+        self.circle = self.setUpCircle(True)
         circle_mapper = vtk.vtkPolyDataMapper()
         circle_mapper.SetInputConnection(self.circle.GetOutputPort())
         self.circle_actor = vtk.vtkActor()
         self.circle_actor.SetMapper(circle_mapper)
+
+        # corresponding circle/sphere in 3D Volume 
+        self.circle3D = self.setUpCircle()
+        circle3D_mapper = vtk.vtkPolyDataMapper()
+        circle3D_mapper.SetInputConnection(self.circle3D.GetOutputPort())
+        self.circle3D_actor = vtk.vtkActor()
+        self.circle3D_actor.SetMapper(circle3D_mapper)
+
+        self.sphere3D = vtk.vtkSphereSource()
+        sphere3D_mapper = vtk.vtkPolyDataMapper()
+        sphere3D_mapper.SetInputConnection(self.sphere3D.GetOutputPort())
+        self.sphere3D_actor = vtk.vtkActor()
+        self.sphere3D_actor.SetMapper(sphere3D_mapper)
+
 
         # map pixels above threshold through colormap
         self.threshold_color_mapped = vtk.vtkImageMapToColors() 
@@ -387,10 +403,11 @@ class SegmentationModuleTab(QWidget):
         self.threshold_color_mapped.SetInputData(self.threshold_img)
 
 
-    def setUpCircle(self): 
+    def setUpCircle(self, dim2D=False): 
         #set up circle to display around cursor and to display brush size  
         circle = vtk.vtkRegularPolygonSource() 
-        circle.GeneratePolygonOff()
+        if dim2D:
+            circle.GeneratePolygonOff()
         circle.SetNumberOfSides(20)
         return circle
     
@@ -411,7 +428,9 @@ class SegmentationModuleTab(QWidget):
         self.brush_slider_label.setEnabled(True) 
         self.threshold_slider.setEnabled(True)
         self.threshold_slider_label.setEnabled(True)
-    
+        if self.toolbar_auto_update.isChecked():
+            self.markerVisible(True)
+            
         # set observers for drawing 
         self.pickEvent = self.slice_view.interactor_style.AddObserver("MouseMoveEvent", self.pickPosition) 
         self.startLeft = self.slice_view.interactor_style.AddObserver("LeftButtonPressEvent", self.start_draw) 
@@ -424,6 +443,8 @@ class SegmentationModuleTab(QWidget):
         self.slice_view.renderer.AddActor(self.mask_slice_actor)
         self.slice_view.interactor_style.SetCurrentImageNumber(0)
         self.slice_view.GetRenderWindow().Render()
+        self.model_view.GetRenderWindow().Render()
+        self.editing_active = True
       
         
     def deactivateEditing(self):
@@ -443,12 +464,18 @@ class SegmentationModuleTab(QWidget):
         self.slice_view.interactor_style.RemoveObserver(self.startRight) 
         self.slice_view.interactor_style.RemoveObserver(self.pickEvent)
 
+        # remove 3D marker
+        self.model_view.renderer.RemoveActor(self.circle3D_actor)
+        self.model_view.renderer.RemoveActor(self.sphere3D_actor)
+ 
         # change scene
         self.slice_view.renderer.RemoveActor(self.circle_actor)
         self.slice_view.renderer.AddActor(self.lumen_outline_actor2D)
         self.slice_view.renderer.AddActor(self.plaque_outline_actor2D)
         self.slice_view.renderer.RemoveActor(self.mask_slice_actor)
         self.slice_view.GetRenderWindow().Render()
+        self.model_view.GetRenderWindow().Render()
+        self.editing_active = False 
         
     
     def brushSizeChanged(self, brush_size): 
@@ -460,12 +487,14 @@ class SegmentationModuleTab(QWidget):
         # create circle mask
         axis = np.arange(-self.brush_size, self.brush_size+1, 1)
         if self.draw3D == False:  
+            self.circle3D.SetRadius(self.brush_size * x_spacing)
             X, Y = np.meshgrid(axis, axis)  
             R = X**2 + Y**2
             R[R < self.brush_size**2] = 1
             R[R > 1] = 0
   
         elif self.draw3D == True:  
+            self.sphere3D.SetRadius(self.brush_size * x_spacing)
             z_scaling = abs(self.image.GetSpacing()[2]/self.image.GetSpacing()[0])
             self.brush_z = int(round(self.brush_size/z_scaling))
             axis_z = np.arange(-self.brush_z, self.brush_z+1, 1)
@@ -476,6 +505,7 @@ class SegmentationModuleTab(QWidget):
             R[R > 1] = 0 
         self.circle_mask = R.astype(np.bool_) 
         self.slice_view.GetRenderWindow().Render() 
+        self.model_view.GetRenderWindow().Render()
 
     def set2DBrush(self, on:bool):
         
@@ -487,6 +517,7 @@ class SegmentationModuleTab(QWidget):
             self.draw3D = True 
             self.toolbar_brush3D.setChecked(True)
         self.brushSizeChanged(abs(round(self.brush_size/self.image.GetSpacing()[0])))
+        self.markerVisible(self.marker)
         
     def set3DBrush(self, on:bool):
         
@@ -496,7 +527,9 @@ class SegmentationModuleTab(QWidget):
         else:
             self.draw3D = False  # set up 2D brush if button clicked second time
             self.toolbar_brush2D.setChecked(True)
-        self.brushSizeChanged(abs(round(self.brush_size/self.image.GetSpacing()[0])))    
+
+        self.brushSizeChanged(abs(round(self.brush_size/self.image.GetSpacing()[0]))) 
+        self.markerVisible(self.marker)
 
 
     def thresholdChanged(self,threshold):
@@ -525,11 +558,29 @@ class SegmentationModuleTab(QWidget):
         self.slice_view.renderer.RemoveActor(self.threshold_actor)
         self.slice_view.GetRenderWindow().Render()  
         
+    # show/hide marker depending on update mode     
+    def markerVisible(self, on:bool):
+        if on: 
+            self.marker = True
+            self.pickPosition(None,None)
+            if self.draw3D:
+                self.model_view.renderer.AddActor(self.sphere3D_actor)
+                self.model_view.renderer.RemoveActor(self.circle3D_actor)
+            else: 
+                self.model_view.renderer.AddActor(self.circle3D_actor)
+                self.model_view.renderer.RemoveActor(self.sphere3D_actor)
+        else: 
+            self.model_view.renderer.RemoveActor(self.circle3D_actor)
+            self.model_view.renderer.RemoveActor(self.sphere3D_actor)
+            self.marker = False
+        self.model_view.GetRenderWindow().Render()
 
     def setColorLumen(self, on:bool):
         if on:
             self.draw_value = 2
             self.circle_actor.GetProperty().SetColor(COLOR_LUMEN)  # set color of circle to lumen 
+            self.circle3D_actor.GetProperty().SetColor(COLOR_LUMEN)
+            self.sphere3D_actor.GetProperty().SetColor(COLOR_LUMEN)
             self.toolbar_plaque.setChecked(False)
         else: 
             self.toolbar_plaque.trigger()
@@ -538,6 +589,8 @@ class SegmentationModuleTab(QWidget):
         if on:
             self.draw_value = 1
             self.circle_actor.GetProperty().SetColor(COLOR_PLAQUE)  # set color of circle to plaque 
+            self.circle3D_actor.GetProperty().SetColor(COLOR_PLAQUE)
+            self.sphere3D_actor.GetProperty().SetColor(COLOR_PLAQUE)
             self.toolbar_lumen.setChecked(False)
         else: 
             self.toolbar_lumen.trigger()
@@ -556,10 +609,24 @@ class SegmentationModuleTab(QWidget):
         self.circle.SetCenter(position[0],
                               position[1],
                               self.image.GetOrigin()[2]-self.image.GetExtent()[2])  # move circle if mouse moved 
+
+        markerPos = (position[0], 
+                          position[1],
+                          self.slice_view.slice*self.image.GetSpacing()[2]-71.3862)  # get value from data !!
+
+        # set position of 3D marker 
+        if self.marker: 
+            if self.draw3D:
+                self.sphere3D.SetCenter(markerPos)  
+            else:
+                self.circle3D.SetCenter(markerPos) 
+            self.model_view.GetRenderWindow().Render()
+        
         self.slice_view.GetRenderWindow().Render()
 
 
     def start_draw(self, obj, event):
+        self.marker = False
         if event == "RightButtonPressEvent": # check if left (-> brush) or right (-> eraser) mouse button pressed
             self.eraser = True 
 
@@ -648,6 +715,7 @@ class SegmentationModuleTab(QWidget):
         if self.toolbar_auto_update.isChecked():  # update if auto-update is checked
             self.model_view.padding.SetInputData(self.label_map)
             self.model_view.GetRenderWindow().Render()
+            self.marker = True
 
         if self.eraser:
             self.eraser = False 
