@@ -31,7 +31,7 @@ class SegmentationModuleTab(QWidget):
         self.volume_file = False         # path to CTA volume file
         self.pred_file = False           # path to CNN segmentation prediction file
         self.plaque_pending = True       # True if no plaque pixels exist yet
-        self.lumen_pending = True        # True if not lumen pixels exist yet
+        self.lumen_pending = True        # True if no lumen pixels exist yet
         self.model_camera_pending = True # True if camera of model_view has not been set yet
         self.editing_active = False      # True if label map editing is active
         self.brush_size = 15             # size of brush on label map
@@ -114,7 +114,7 @@ class SegmentationModuleTab(QWidget):
         self.edit_toolbar.addAction(self.toolbar_auto_update)
 
 
-        # add everything to a layou
+        # add everything to a layout
         self.slice_view_layout = QVBoxLayout()
         self.slice_view_layout.addWidget(self.CNN_button)
         self.slice_view_layout.addWidget(self.edit_toolbar)
@@ -384,7 +384,7 @@ class SegmentationModuleTab(QWidget):
         self.masks_color_mapped.SetInputData(self.label_map)
 
 
-    def __loadImageData(self):  # double underscore necessary?
+    def __loadImageData(self): 
         # image to display threshold
         shape = self.image.GetDimensions()
         position = self.image.GetOrigin()
@@ -404,7 +404,7 @@ class SegmentationModuleTab(QWidget):
 
 
     def setUpCircle(self, dim2D=False): 
-        #set up circle to display around cursor and to display brush size  
+        # set up circle to display around cursor and to display brush size  
         circle = vtk.vtkRegularPolygonSource() 
         if dim2D:
             circle.GeneratePolygonOff()
@@ -562,7 +562,7 @@ class SegmentationModuleTab(QWidget):
     def markerVisible(self, on:bool):
         if on: 
             self.marker = True
-            self.pickPosition(None,None)
+            self.pickPosition(None,self.marker)
             if self.draw3D:
                 self.model_view.renderer.AddActor(self.sphere3D_actor)
                 self.model_view.renderer.RemoveActor(self.circle3D_actor)
@@ -599,7 +599,7 @@ class SegmentationModuleTab(QWidget):
     def pickPosition(self, obj, event):
         # pick current mouse position
         x,y = self.slice_view.GetEventPosition()  
-        self.picker.Pick(x,y,self.slice_view.slice,self.slice_view.renderer) 
+        pick = self.picker.Pick(x,y,self.slice_view.slice,self.slice_view.renderer) 
         position = self.picker.GetPickPosition()  # world coordinates 
         origin = self.image.GetOrigin()
         self.imgPos = ((position[0]-origin[0])/self.image.GetSpacing()[0], 
@@ -610,16 +610,13 @@ class SegmentationModuleTab(QWidget):
                               position[1],
                               self.image.GetOrigin()[2]-self.image.GetExtent()[2])  # move circle if mouse moved 
 
-        markerPos = (position[0], 
-                          position[1],
-                          position[2])
 
         # set position of 3D marker 
-        if self.marker: 
+        if self.marker and (pick or event==True): 
             if self.draw3D:
-                self.sphere3D.SetCenter(markerPos)  
+                self.sphere3D.SetCenter(position)  
             else:
-                self.circle3D.SetCenter(markerPos) 
+                self.circle3D.SetCenter(position)  
             self.model_view.GetRenderWindow().Render()
         
         self.slice_view.GetRenderWindow().Render()
