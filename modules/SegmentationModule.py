@@ -612,7 +612,7 @@ class SegmentationModuleTab(QWidget):
 
         markerPos = (position[0], 
                           position[1],
-                          self.slice_view.slice*self.image.GetSpacing()[2]-71.3862)  # get value from data !!
+                          position[2])
 
         # set position of 3D marker 
         if self.marker: 
