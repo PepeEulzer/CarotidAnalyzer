@@ -1,11 +1,15 @@
 import os
 import sys
 import glob
+from collections import OrderedDict
 
+import pydicom
+import numpy as np 
+import nrrd
 from PyQt5.QtCore import QSettings, QVariant
 from PyQt5.QtWidgets import (
     QApplication, QFileDialog, QMainWindow, QMessageBox, 
-    QTreeWidgetItem
+    QTreeWidgetItem, QInputDialog
 )
 from PyQt5.QtGui import QColor
 
@@ -49,7 +53,8 @@ class CarotidAnalyzer(QMainWindow, Ui_MainWindow):
         ]
         
         # connect signals to slots
-        self.action_load_new_DICOM.triggered.connect(self.loadNewDICOM)
+        #self.action_load_new_DICOM.triggered.connect(self.loadNewDICOM)
+        self.action_load_new_DICOM.triggered.connect(self.openDICOMDirDialog)
         self.action_set_working_directory.triggered.connect(self.openWorkingDirDialog)
         self.action_data_inspector.triggered[bool].connect(self.viewDataInspector)
         self.action_crop_module.triggered[bool].connect(self.viewCropModule)
@@ -81,13 +86,74 @@ class CarotidAnalyzer(QMainWindow, Ui_MainWindow):
         dir = settings.value("LastWorkingDir")
         if dir != None:
             self.setWorkingDir(dir)
+ 
+    def loadNewDICOM(self,source_dir,target_dir,dir_name):
+        data = []
+        path = os.listdir(source_dir)
 
+        # read in each dcm and save pixel data
+        for file in(path):
+            ds = pydicom.dcmread(os.path.join(source_dir,file))
+            data.append(ds.pixel_array)  # kommt man noch irgendwie anders and Daten bzw muessen diese anders eingelesen werden? 
+        data_array = np.transpose(np.array(data))
+        filename = dir_name + ".nrrd"
+        nrrd_path = os.path.join(target_dir,dir_name,filename)
 
-    def loadNewDICOM(self):
-        print("Call file dialog. Load a DICOM dataset")
-        print("NOT IMPLEMENTED")
+        # write header for nrrd data 
+        dicom4metadata = pydicom.dcmread(os.path.join(source_dir,path[0]))
+        dim_x, dim_y, dim_z = data_array.shape
+        s_z = float(dicom4metadata[0x0018,0x0088].value)  # spacing between slices 
+        s_x_y = dicom4metadata[0x0028,0x0030].value  # pixel spacing 
+        pos = dicom4metadata[0x0020,0x0032].value  # image position 
 
+        header = OrderedDict()
+        header['type'] = 'int16'
+        header['dimension'] = 3
+        header['space'] = 'left-posterior-superior'
+        header['sizes'] =  str(dim_x) + str(dim_y) + str(dim_z) # in saegmentation modul str, in nrrd from data array
+        header['space directions'] = [[s_x_y[0],0.0,0.0],[0.0,s_x_y[1],0.0],[0.0,0.0,s_z]]
+        header['kinds'] = ['domain', 'domain', 'domain']
+        header['endian'] = 'little'
+        header['encoding'] = 'gzip'
+        header['space origin'] = pos # in other data got this from origin??? -> braucht man - wo steht das in dicom header?? vielleicht kann header nochmal vollständig ausgegeben werden? oder wurde das fest gesetzt (in anderen nrrd gucken)
+        nrrd.write(nrrd_path, data_array, header)
+        self.setWorkingDir(target_dir) # optional?
+        # TO-DO: automatically load in data from convertes nrrd (get index/name of correct tree widget item!) 
+
+    """def openDICOMDirDialog(self):
+        source_dir = QFileDialog.getExistingDirectory(self, "Set source Directory for DICOM file")
+        self.openTargetDirDialog(source_dir)
+
+    def openTargetDirDialog(self,source_dir):
+        target_dir = QFileDialog.getExistingDirectory(self, "Set target Directory")
+        #if len(dir) > 0:
+        self.createPatientDirectory(target_dir)
+        self.loadNewDICOM(source_dir,target_dir)
+    def createPatientDirectory(self,dir):
+        text, ok = QInputDialog().getText(self,"!!","Enter name of Directory for patient data:")
+        if text and ok:
+            path = os.path.join(dir,text) 
+            os.mkdir(path)
+            os.mkdir(os.path.join(path,"models"))"""   
+        #self.loadNewDICOM(path)
     
+    def openDICOMDirDialog(self): 
+        # set path for dcm files and path to save converted data 
+        source_dir = QFileDialog.getExistingDirectory(self, "Set source Directory for DICOM files")
+        target_dir = QFileDialog.getExistingDirectory(self, "Set target Directory")
+        
+        if target_dir:
+            # userinput for target filename
+            dir_name, ok = QInputDialog().getText(self,"Set patient Directory","Enter name of Directory for patient data:")
+            if dir_name and ok:
+                path = os.path.join(target_dir,dir_name) 
+                os.mkdir(path)
+                os.mkdir(os.path.join(path,"models"))
+            self.loadNewDICOM(source_dir,target_dir,dir_name)
+        else:
+            print("Please select a target directory")
+        
+
     def setWorkingDir(self, dir):
         if len(dir) <= 0:
             return
