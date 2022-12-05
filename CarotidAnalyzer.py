@@ -94,7 +94,7 @@ class CarotidAnalyzer(QMainWindow, Ui_MainWindow):
         # read in each dcm and save pixel data
         for file in(path):
             ds = pydicom.dcmread(os.path.join(source_dir,file))
-            data.append(ds.pixel_array)  # kommt man noch irgendwie anders and Daten bzw muessen diese anders eingelesen werden? 
+            data.append(ds.pixel_array) 
         data_array = np.transpose(np.array(data))
         filename = dir_name + ".nrrd"
         nrrd_path = os.path.join(target_dir,dir_name,filename)
@@ -110,32 +110,15 @@ class CarotidAnalyzer(QMainWindow, Ui_MainWindow):
         header['type'] = 'int16'
         header['dimension'] = 3
         header['space'] = 'left-posterior-superior'
-        header['sizes'] =  str(dim_x) + str(dim_y) + str(dim_z) # in saegmentation modul str, in nrrd from data array
+        header['sizes'] =  str(dim_x) + str(dim_y) + str(dim_z) 
         header['space directions'] = [[s_x_y[0],0.0,0.0],[0.0,s_x_y[1],0.0],[0.0,0.0,s_z]]
         header['kinds'] = ['domain', 'domain', 'domain']
         header['endian'] = 'little'
         header['encoding'] = 'gzip'
-        header['space origin'] = pos # in other data got this from origin??? -> braucht man - wo steht das in dicom header?? vielleicht kann header nochmal vollständig ausgegeben werden? oder wurde das fest gesetzt (in anderen nrrd gucken)
+        header['space origin'] = pos
         nrrd.write(nrrd_path, data_array, header)
-        self.setWorkingDir(target_dir) # optional?
-        # TO-DO: automatically load in data from convertes nrrd (get index/name of correct tree widget item!) 
+        self.setWorkingDir(target_dir) 
 
-    """def openDICOMDirDialog(self):
-        source_dir = QFileDialog.getExistingDirectory(self, "Set source Directory for DICOM file")
-        self.openTargetDirDialog(source_dir)
-
-    def openTargetDirDialog(self,source_dir):
-        target_dir = QFileDialog.getExistingDirectory(self, "Set target Directory")
-        #if len(dir) > 0:
-        self.createPatientDirectory(target_dir)
-        self.loadNewDICOM(source_dir,target_dir)
-    def createPatientDirectory(self,dir):
-        text, ok = QInputDialog().getText(self,"!!","Enter name of Directory for patient data:")
-        if text and ok:
-            path = os.path.join(dir,text) 
-            os.mkdir(path)
-            os.mkdir(os.path.join(path,"models"))"""   
-        #self.loadNewDICOM(path)
     
     def openDICOMDirDialog(self): 
         # set path for dcm files and path to save converted data 
