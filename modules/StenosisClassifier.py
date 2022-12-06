@@ -1,11 +1,12 @@
 import os
+import json
 
 import numpy as np
 import vtk
 from vtk.util.numpy_support import vtk_to_numpy
 from vtk.qt.QVTKRenderWindowInteractor import QVTKRenderWindowInteractor
-from PyQt5.QtWidgets import QWidget, QHBoxLayout, QTabWidget, QGraphicsPathItem
-from PyQt5.QtGui import QColor, QPainterPath
+from PyQt5.QtWidgets import QWidget, QShortcut, QHBoxLayout, QTabWidget, QGraphicsPathItem
+from PyQt5.QtGui import QColor, QPainterPath, QKeySequence
 from PyQt5.QtCore import Qt, QRectF, QLineF, pyqtSignal
 import pyqtgraph as pg
 
@@ -143,6 +144,8 @@ class StenosisWrapper(object):
         self.rad = rad_array
         self.arc = arc_array
         self.colorID = colorID
+        self.degree = 0.0
+        self.degree_string = "0.0%"
 
         # compute implicit spheres around stenosis region
         clip_function_spheres = vtk.vtkImplicitBoolean()
@@ -266,8 +269,8 @@ class StenosisWrapper(object):
         
     def __computeStenosisDegree(self, ref_idx):
         nascet_ref_dia = 2.0 * self.rad[ref_idx]
-        degree = ((nascet_ref_dia - self.nascet_min_dia) / nascet_ref_dia) * 100.0
-        self.degree_string = f'{degree:.1f}%'
+        self.degree = ((nascet_ref_dia - self.nascet_min_dia) / nascet_ref_dia) * 100.0
+        self.degree_string = f'{self.degree:.1f}%'
         self.full_description =  f'Stenosis degree (NASCET): {self.degree_string}\n'\
                                  f'Smallest inner diameter: {self.nascet_min_dia:.1f} mm\n'\
                                  f'Reference diameter: {nascet_ref_dia:.1f} mm\n'\
@@ -341,6 +344,12 @@ class StenosisClassifierTab(QWidget):
     """
     def __init__(self, parent=None):
         super().__init__(parent)
+
+        # create shortcut for saving scene meta information
+        self.save_filename = ""
+        self.save_shortcut = QShortcut(QKeySequence("Ctrl+S"), self)
+        self.save_shortcut.activated.connect(self.save_scene)
+
         self.min_branch_len = 20 # minimal length of a branch in mm
         self.branch_cutoff = 1  # length to be cut from branch ends in mm
 
@@ -419,6 +428,31 @@ class StenosisClassifierTab(QWidget):
         self.model_view.EnableRenderOff()
         super(StenosisClassifierTab, self).hideEvent(event)
 
+    def save_scene(self):
+        if len(self.save_filename) == 0 or len(self.c_stenosis_lists[0]) == 0:
+            print("Nothing to save.")
+            return
+
+        # save meta information on the highest ACI stenosis
+        print("Saving " + self.save_filename)
+        ACI_stenoses = self.c_stenosis_lists[0]
+        stenosis = ACI_stenoses[0]
+        for s in ACI_stenoses:
+            if s.degree > stenosis.degree:
+                stenosis = s
+
+        d = {"ACI_diam_threshold": 1.5,
+             "stenosis_degree":round(stenosis.degree, 1),
+             "stenosis_min_p":[0.1, 0.2, 0.3],
+             "stenosis_min_n":[1.1, 1.2, 1.3],
+             "poststenotic_p":[0.1, 0.2, 0.3],
+             "poststenotic_n":[1.1, 1.2, 1.3]}
+        try:
+            with open(self.save_filename, 'w') as f:
+                json.dump(d, f)
+        except: 
+            print("Could not write file.")
+
     
     def cameraModifiedEvent(self, obj, ev):
         for stenosis_list in self.c_stenosis_lists:
@@ -442,6 +476,14 @@ class StenosisClassifierTab(QWidget):
             self.__preprocessCenterlines()
             self.plot_radii()
 
+            # load scene if saved
+            self.save_filename = lumen_file[:-9] + "meta.txt"
+            if os.path.exists(self.save_filename):
+                with open(self.save_filename, 'r') as f:
+                    d = json.load(f)
+                    print(d)
+                # TODO set scene
+
         else:
             # clear all
             self.clearStenoses()
@@ -452,6 +494,7 @@ class StenosisClassifierTab(QWidget):
                 self.renderer.RemoveActor(actor)
             self.branch_actors = []
             self.text_patient.SetInput("No lumen or centerlines file found for this side.")
+            self.save_filename = ""
 
         # reset scene and render
         self.renderer.ResetCamera()
