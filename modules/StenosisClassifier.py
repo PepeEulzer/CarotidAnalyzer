@@ -137,15 +137,27 @@ class StenosisWrapper(object):
     """
     def __init__(self, vtk_renderer, lineplot, lineROI,
                  vessel_geometry, pos_array, rad_array, arc_array, start_index, idx1, idx2, colorID):
+        
+        # reference to holding objects
         self.vtk_renderer = vtk_renderer
         self.lineplot = lineplot
         self.start_index = start_index
+        self.colorID = colorID
+
+        # reference to relevant data arrays
         self.pos = pos_array
         self.rad = rad_array
         self.arc = arc_array
-        self.colorID = colorID
+
+        # meta information on stenosis
         self.degree = 0.0
         self.degree_string = "0.0%"
+        self.stenosis_arc_len = 0
+        self.threshold =lineROI.getYPos()
+        self.min_diameter_pos = None
+        self.min_diameter_normal = None
+        self.ref_diameter_pos = None
+        self.ref_diameter_normal = None
 
         # compute implicit spheres around stenosis region
         clip_function_spheres = vtk.vtkImplicitBoolean()
@@ -188,14 +200,13 @@ class StenosisWrapper(object):
         # create 2D stenosis area
         area_x = self.arc[idx1:idx2]
         area_y = 2.0 * self.rad[idx1:idx2]
-        h = lineROI.getYPos()
         path = QPainterPath()
-        x1 = self.__getLineIntersection(self.arc[idx1-1], self.arc[idx1], 2.0 * self.rad[idx1-1], 2.0 * self.rad[idx1], h)
-        path.moveTo(x1, h)
+        x1 = self.__getLineIntersection(self.arc[idx1-1], self.arc[idx1], 2.0 * self.rad[idx1-1], 2.0 * self.rad[idx1], self.threshold)
+        path.moveTo(x1, self.threshold)
         for i in range(area_x.shape[0]):
             path.lineTo(area_x[i], area_y[i])
-        x2 = self.__getLineIntersection(self.arc[idx2-1], self.arc[idx2], 2.0 * self.rad[idx2-1], 2.0 * self.rad[idx2], h)
-        path.lineTo(x2, h)
+        x2 = self.__getLineIntersection(self.arc[idx2-1], self.arc[idx2], 2.0 * self.rad[idx2-1], 2.0 * self.rad[idx2], self.threshold)
+        path.lineTo(x2, self.threshold)
         self.stenosis_area = StenosisAreaItem(self.stenosisAreaHoverEnter,
                                               self.stenosisAreaHoverLeave,
                                               pg.mkBrush(STENOSIS_COLORS_QT[colorID]),
@@ -204,11 +215,18 @@ class StenosisWrapper(object):
         self.lineplot.addItem(self.stenosis_area)
 
         # calculate stenosis degree and information
-        self.nascet_min_dia = 2.0 * np.min(self.rad[idx1:idx2])
+        min_idx = idx1 + np.argmin(self.rad[idx1:idx2])
+        self.nascet_min_dia = 2.0 * self.rad[min_idx]
+        self.min_diameter_pos = self.pos[min_idx]
+        self.min_diameter_normal = np.mean(self.pos[min_idx:min_idx+6] - self.pos[min_idx-5:min_idx+1], axis=0)
+        self.min_diameter_normal /= np.linalg.norm(self.min_diameter_normal)
         half_stenosis_length = int((idx2 - idx1)/2)
         self.stenosis_arc_len = self.arc[idx2] - self.arc[idx1]
-        reference_idx = min(idx2 + half_stenosis_length, self.pos.shape[0]-2)
-        self.__computeStenosisDegree(reference_idx)
+        ref_idx = min(idx2 + half_stenosis_length, self.pos.shape[0]-2)
+        self.ref_diameter_pos = self.pos[ref_idx]
+        self.ref_diameter_normal = np.mean(self.pos[min_idx:min_idx+6] - self.pos[min_idx-5:min_idx+1], axis=0)
+        self.ref_diameter_normal /= np.linalg.norm(self.ref_diameter_normal)
+        self.__computeStenosisDegree(ref_idx)
 
         # create 2D text actor
         self.text_idx = idx1 + half_stenosis_length
@@ -230,7 +248,7 @@ class StenosisWrapper(object):
         self.update3DTextPos()
 
         # create 2D nascet reference marker
-        self.reference_marker2D = pg.InfiniteLine(pos=self.arc[reference_idx], 
+        self.reference_marker2D = pg.InfiniteLine(pos=self.arc[ref_idx], 
                                                   angle=90,
                                                   movable=True,
                                                   bounds=[self.arc[1], self.arc[-2]],
@@ -240,11 +258,11 @@ class StenosisWrapper(object):
 
         # create 3D nascet reference marker
         self.reference_marker3D = vtk.vtkLineSource()
-        self.reference_marker3D.SetPoint1(self.pos[reference_idx-1])
-        self.reference_marker3D.SetPoint2(self.pos[reference_idx+1])
+        self.reference_marker3D.SetPoint1(self.pos[ref_idx-1])
+        self.reference_marker3D.SetPoint2(self.pos[ref_idx+1])
         self.tube_filter = vtk.vtkTubeFilter()
         self.tube_filter.SetInputConnection(self.reference_marker3D.GetOutputPort())
-        self.tube_filter.SetRadius(1.5*self.rad[reference_idx])
+        self.tube_filter.SetRadius(1.5*self.rad[ref_idx])
         self.tube_filter.SetNumberOfSides(25)
         self.tube_filter.CappingOn()
         mapper = vtk.vtkPolyDataMapper()
@@ -294,6 +312,9 @@ class StenosisWrapper(object):
     def referenceMoved(self):
         # re-compute stenosis degree, update description
         idx = np.searchsorted(self.arc, self.reference_marker2D.getXPos())
+        self.ref_diameter_pos = self.pos[idx]
+        self.ref_diameter_normal = np.mean(self.pos[idx:idx+6] - self.pos[idx-5:idx+1], axis=0)
+        self.ref_diameter_normal /= np.linalg.norm(self.ref_diameter_normal)
         self.__computeStenosisDegree(idx)
 
         # update scene
@@ -433,23 +454,26 @@ class StenosisClassifierTab(QWidget):
             print("Nothing to save.")
             return
 
-        # save meta information on the highest ACI stenosis
-        print("Saving " + self.save_filename)
+        # collect meta information on the highest ACI stenosis
         ACI_stenoses = self.c_stenosis_lists[0]
         stenosis = ACI_stenoses[0]
         for s in ACI_stenoses:
             if s.degree > stenosis.degree:
                 stenosis = s
+        d = {"diameter_threshold": stenosis.threshold,
+             "stenosis_degree":float(stenosis.degree),
+             "stenosis_length":float(stenosis.stenosis_arc_len),
+             "stenosis_min_p":stenosis.min_diameter_pos.tolist(),
+             "stenosis_min_n":stenosis.min_diameter_normal.tolist(),
+             "poststenotic_arcval":float(stenosis.reference_marker2D.getXPos()),
+             "poststenotic_p":stenosis.ref_diameter_pos.tolist(),
+             "poststenotic_n":stenosis.ref_diameter_normal.tolist()}
 
-        d = {"ACI_diam_threshold": 1.5,
-             "stenosis_degree":round(stenosis.degree, 1),
-             "stenosis_min_p":[0.1, 0.2, 0.3],
-             "stenosis_min_n":[1.1, 1.2, 1.3],
-             "poststenotic_p":[0.1, 0.2, 0.3],
-             "poststenotic_n":[1.1, 1.2, 1.3]}
+        # save dict to json
         try:
             with open(self.save_filename, 'w') as f:
                 json.dump(d, f)
+            print("Saved " + self.save_filename)
         except: 
             print("Could not write file.")
 
@@ -478,11 +502,13 @@ class StenosisClassifierTab(QWidget):
 
             # load scene if saved
             self.save_filename = lumen_file[:-9] + "meta.txt"
-            if os.path.exists(self.save_filename):
-                with open(self.save_filename, 'r') as f:
-                    d = json.load(f)
-                    print(d)
-                # TODO set scene
+            # if os.path.exists(self.save_filename):
+            #     try:
+            #         with open(self.save_filename, 'r') as f:
+            #             d = json.load(f)
+            #     except:
+            #         print("Classifier module could not load " + self.save_filename)
+            # TODO set scene
 
         else:
             # clear all

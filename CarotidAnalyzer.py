@@ -441,6 +441,14 @@ class CarotidAnalyzer(QMainWindow, Ui_MainWindow):
             self.active_patient_dict['centerlines_right'] = path_right
             centerlines_item.setText(2, SYM_YES)
 
+        # delete meta information files for stenoses if they exist
+        meta_path_left = os.path.join(base_path, "models", patient_ID + "_left_meta.txt")
+        meta_path_right = os.path.join(base_path, "models", patient_ID + "_right_meta.txt")
+        if os.path.exists(meta_path_left):
+            os.remove(meta_path_left)
+        if os.path.exists(meta_path_right):
+            os.remove(meta_path_right)
+
         # propagate
         self.stenosis_classifier.loadPatient(self.active_patient_dict)
 
