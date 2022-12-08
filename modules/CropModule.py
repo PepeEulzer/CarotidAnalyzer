@@ -296,26 +296,15 @@ class CropModule(QWidget):
 
 
     def loadPatient(self, patient_dict,image=None):
-        if image: # load patient if data from dicom 
+        self.patient_dict = patient_dict
+
+        # load patient if data from dicom
+        if image:  
             self.image = image
-            spacing = self.image.GetSpacing()
-             # compute crop volume size around a center
-            # needs to be 1/4 of target dimension (120 144 248) #####-> passt das mit target dimension?
-            self.crop_volume_size = (30*spacing[0], 36*spacing[1], 62*spacing[2])
-
-            ##### kann das zusammengefasst (sodass nicht mehr redundant)
-            # set the volume image in both views
-            self.volume_view.setImage(self.image)
-            self.slice_view.setImage(self.image)
-            #self.slice_view.text_patient.SetInput(os.path.basename(patient_dict['volume_raw'])[:-5])
-            self.slice_view_slider.setRange(
-                self.slice_view.min_slice,
-                self.slice_view.max_slice
-            )
-            self.slice_view_slider.setSliderPosition(self.slice_view.slice)
-
-        else: # load patient if data from nrrd
-            self.patient_dict = patient_dict
+            sx, sy, sz = self.image.GetSpacing()
+           
+        # load patient if data from nrrd   
+        else: 
             if not patient_dict['volume_raw']:
                 self.image = None
                 self.resetViews()
@@ -330,24 +319,27 @@ class CropModule(QWidget):
             vtk_data_array = numpy_to_vtk(img_data.ravel(order='F'))
             self.image.GetPointData().SetScalars(vtk_data_array)
 
-            # compute crop volume size around a center
-            # needs to be 1/4 of target dimension (120 144 248)
-            self.crop_volume_size = (30*sx, 36*sy, 62*sz)
+        # compute crop volume size around a center
+        # needs to be 1/4 of target dimension (120 144 248)
+        self.crop_volume_size = (30*sx, 36*sy, 62*sz)
 
-            # set the volume image in both views
-            self.volume_view.setImage(self.image)
-            self.slice_view.setImage(self.image)
+        # set the volume image in both views
+        self.volume_view.setImage(self.image)
+        self.slice_view.setImage(self.image)
+        if image: 
+            self.slice_view.text_patient.SetInput(patient_dict['patient_ID'])
+        else:
             self.slice_view.text_patient.SetInput(os.path.basename(patient_dict['volume_raw'])[:-5])
-            self.slice_view_slider.setRange(
-                self.slice_view.min_slice,
-                self.slice_view.max_slice
-            )
-            self.slice_view_slider.setSliderPosition(self.slice_view.slice)
+        self.slice_view_slider.setRange(
+            self.slice_view.min_slice,
+            self.slice_view.max_slice
+        )
 
-            # load crop volume boxes if they exist
-            self.__loadCropVolumeBox(self.patient_dict['volume_left'], self.box_left_source, self.box_left_actor, self.cut_left_actor)
-            self.__loadCropVolumeBox(self.patient_dict['volume_right'], self.box_right_source, self.box_right_actor, self.cut_right_actor)
+        # load crop volume boxes if they exist
+        self.__loadCropVolumeBox(self.patient_dict['volume_left'], self.box_left_source, self.box_left_actor, self.cut_left_actor)
+        self.__loadCropVolumeBox(self.patient_dict['volume_right'], self.box_right_source, self.box_right_actor, self.cut_right_actor)
 
+        self.slice_view_slider.setSliderPosition(self.slice_view.slice)
         # enable edit options
         self.button_set_left.setEnabled(True)
         self.button_set_right.setEnabled(True)
