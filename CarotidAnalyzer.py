@@ -6,6 +6,8 @@ from collections import OrderedDict
 import pydicom
 import numpy as np 
 import nrrd
+from vtk.util.numpy_support import numpy_to_vtk
+import vtk
 from PyQt5.QtCore import QSettings, QVariant
 from PyQt5.QtWidgets import (
     QApplication, QFileDialog, QMainWindow, QMessageBox, 
@@ -87,25 +89,54 @@ class CarotidAnalyzer(QMainWindow, Ui_MainWindow):
         if dir != None:
             self.setWorkingDir(dir)
  
-    def loadNewDICOM(self,source_dir,target_dir,dir_name):
+    def loadNewDICOM(self,source_dir,dir_name):
         data = []
         path = os.listdir(source_dir)
 
         # read in each dcm and save pixel data
         for file in(path):
             ds = pydicom.dcmread(os.path.join(source_dir,file))
-            data.append(ds.pixel_array) 
+            data.append(ds.pixel_array)
         data_array = np.transpose(np.array(data))
-        filename = dir_name + ".nrrd"
-        nrrd_path = os.path.join(target_dir,dir_name,filename)
+        #filename = dir_name + ".nrrd"
+        #nrrd_path = os.path.join(self.working_dir,dir_name,filename)
 
         # write header for nrrd data 
         dicom4metadata = pydicom.dcmread(os.path.join(source_dir,path[0]))
         dim_x, dim_y, dim_z = data_array.shape
         s_z = float(dicom4metadata[0x0018,0x0088].value)  # spacing between slices 
         s_x_y = dicom4metadata[0x0028,0x0030].value  # pixel spacing 
-        pos = dicom4metadata[0x0020,0x0032].value  # image position 
+        pos = dicom4metadata[0x0020,0x0032].value  # image position
+        
+        # save data as vtkImageData
+        image = vtk.vtkImageData()
+        image.SetDimensions(dim_x,dim_y,dim_z) 
+        image.SetSpacing(s_x_y[0],s_x_y[1],s_z)
+        image.SetOrigin(pos)
+        vtk_data_array = numpy_to_vtk(data_array.ravel(order='F'))
+        image.GetPointData().SetScalars(vtk_data_array)
 
+        # update tree widget, save as selected item, load patient
+        self.setWorkingDir(self.working_dir) 
+        self.setPatientTreeItemColor(self.active_patient_tree_widget_item, COLOR_UNSELECTED)  
+        for patient in self.patient_data:
+            if(patient['patient_ID']==dir_name):
+                self.active_patient_dict = patient
+                self.crop_module.loadPatient(patient,image)
+                self.segmentation_module.loadPatient(patient)
+                self.centerline_module.loadPatient(patient)
+                self.stenosis_classifier.loadPatient(patient)
+                if SHOW_MODEL_MISMATCH_WARNING:
+                    self.__checkSegMatchesModels()
+                break
+
+        for i in range(self.tree_widget_data.topLevelItemCount()):
+                if self.tree_widget_data.topLevelItem(i).text(0)==dir_name:
+                    self.active_patient_tree_widget_item = self.tree_widget_data.topLevelItem(i)
+        self.setPatientTreeItemColor(self.active_patient_tree_widget_item, COLOR_SELECTED)
+
+        # option to save as nrrd 
+        """ 
         header = OrderedDict()
         header['type'] = 'int16'
         header['dimension'] = 3
@@ -117,24 +148,25 @@ class CarotidAnalyzer(QMainWindow, Ui_MainWindow):
         header['encoding'] = 'gzip'
         header['space origin'] = pos
         nrrd.write(nrrd_path, data_array, header)
-        self.setWorkingDir(target_dir) 
+        # add to tree_widget !!"""
 
     
     def openDICOMDirDialog(self): 
-        # set path for dcm files and path to save converted data 
+        # set path for dcm file
         source_dir = QFileDialog.getExistingDirectory(self, "Set source Directory for DICOM files")
-        target_dir = QFileDialog.getExistingDirectory(self, "Set target Directory")
         
-        if target_dir:
-            # userinput for target filename
-            dir_name, ok = QInputDialog().getText(self,"Set patient Directory","Enter name of Directory for patient data:")
-            if dir_name and ok:
-                path = os.path.join(target_dir,dir_name) 
-                os.mkdir(path)
-                os.mkdir(os.path.join(path,"models"))
-            self.loadNewDICOM(source_dir,target_dir,dir_name)
-        else:
-            print("Please select a target directory")
+        # userinput for target filename
+        dir_name, ok = QInputDialog.getText(self,"Set patient Directory","Enter name of Directory for patient data:")
+        if dir_name and ok:
+            path = os.path.join(self.working_dir,dir_name) # so richtig?
+            os.mkdir(path)
+            os.mkdir(os.path.join(path,"models"))
+
+        if source_dir and dir_name:
+            self.loadNewDICOM(source_dir,dir_name)
+        else: 
+            print("Please choose input data and enter a name for the target directory!")
+        
         
 
     def setWorkingDir(self, dir):
@@ -244,7 +276,7 @@ class CarotidAnalyzer(QMainWindow, Ui_MainWindow):
                 item.child(i).setBackground(j, c)
 
 
-    def loadSelectedPatient(self):
+    def loadSelectedPatient(self):  
         if self.unsaved_changes:
             return
 
