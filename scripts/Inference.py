@@ -13,7 +13,7 @@ from skimage.exposure import rescale_intensity
 
 def init_model(device, weights=None):
     model = UNet(
-    dimensions=3,
+    spatial_dims=3,
     in_channels=1,
     out_channels=3,
     channels=(16, 32, 64, 128),  
@@ -163,7 +163,7 @@ class CarotidDataset(Dataset):
 
     def _crop(self, data, h=120, w=144, z=248):
         h0, w0, z0 = data.shape
-        assert h0 >= h and w0 >= w and z0 > z, 'cannot crop'
+        assert h0 >= h and w0 >= w and z0 >= z, 'cannot crop'
         return data[:h, :w, :z]
 
 

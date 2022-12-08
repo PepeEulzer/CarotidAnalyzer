@@ -1,7 +1,7 @@
 import os
 
 import vtk
-from vmtk import vmtkscripts
+# from vmtk import vmtkscripts # temporarily disabled
 from vtk.qt.QVTKRenderWindowInteractor import QVTKRenderWindowInteractor
 from PyQt5.QtCore import pyqtSignal
 from PyQt5.QtWidgets import QWidget, QVBoxLayout, QTabWidget, QPushButton
@@ -70,14 +70,17 @@ class CenterlineModuleTab(QWidget):
         if not self.lumen_active:
             print("No lumen to compute centerlines from.")
             return
-        centerlines_script = vmtkscripts.vmtkCenterlines()
-        centerlines_script.Surface = self.reader_lumen.GetOutput()
-        centerlines_script.Execute()
-        self.centerlines = centerlines_script.Centerlines
-        self.mapper_centerline.SetInputData(self.centerlines)
-        self.renderer.AddActor(self.actor_centerline)
-        self.centerline_view.GetRenderWindow().Render()
-        self.data_modified.emit()
+
+        print("Temporarily disabled.")
+        return
+        # centerlines_script = vmtkscripts.vmtkCenterlines()
+        # centerlines_script.Surface = self.reader_lumen.GetOutput()
+        # centerlines_script.Execute()
+        # self.centerlines = centerlines_script.Centerlines
+        # self.mapper_centerline.SetInputData(self.centerlines)
+        # self.renderer.AddActor(self.actor_centerline)
+        # self.centerline_view.GetRenderWindow().Render()
+        # self.data_modified.emit()
 
 
     def showEvent(self, event):
