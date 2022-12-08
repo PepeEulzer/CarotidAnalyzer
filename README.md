@@ -6,6 +6,7 @@ A full pipeline for cropping, segmentation, centerline computation, and interact
 
 Main dependencies
 - Python 3.10
+- pytorch 1.13
 - numpy 1.23
 - pyqt 5.15
 - vtk 9.1
