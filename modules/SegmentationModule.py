@@ -12,6 +12,7 @@ from PyQt5.QtWidgets import  (
 )
 
 from modules.Interactors import ImageSliceInteractor, IsosurfaceInteractor
+from modules.Predictor import CarotidSegmentationPredictor
 from defaults import *
 
 class SegmentationModuleTab(QWidget):  
@@ -19,10 +20,11 @@ class SegmentationModuleTab(QWidget):
     Tab view of a right OR left side carotid for segmentation.
     """
     data_modified = pyqtSignal()
-    def __init__(self, parent=None):
+    def __init__(self, predictor, parent=None):
         super().__init__(parent)
 
         # state
+        self.predictor = predictor       # global wrapper for pytorch execution
         self.image = None                # underlying CTA volume image
         self.image_data = None           # numpy array of raw image scalar data
         self.label_map = None            # segmentation label map
@@ -363,26 +365,40 @@ class SegmentationModuleTab(QWidget):
     def generateCNNSeg(self):
         dlg = QMessageBox(self)
         dlg.setWindowTitle("New Segmentation: Initialize with CNN")
-        if not self.pred_file:
-            dlg.setText("Error: Could not generate segmentation prediction.")
-            dlg.setStandardButtons(QMessageBox.Cancel)
-            button = dlg.exec()
-        else:
-            dlg.setText("<p align='center'>Generate a segmentation prediction?<br>WARNING: Fully overwrites current mask!</p>")
-            dlg.setStandardButtons(QMessageBox.Ok | QMessageBox.Cancel)
-            button = dlg.exec()
-            if button == QMessageBox.Ok:
-                self.label_map, self.plaque_pending, self.lumen_pending = self.model_view.loadNrrd(self.pred_file)
-                self.__loadLabelMapData()
-                self.model_camera_pending = False
-                self.model_view.renderer.AddActor(self.lumen_outline_actor3D)
+        dlg.setText("<p align='center'>Generate a segmentation prediction?<br>WARNING: Fully overwrites current mask!</p>")
+        dlg.setStandardButtons(QMessageBox.Ok | QMessageBox.Cancel)
+        button = dlg.exec()
+        if button == QMessageBox.Ok:
+            # self.predictor = CarotidSegmentationPredictor()
+            self.predictor.setData(self.image_data, "test")
+            prediction_label_map = self.predictor.run_inference()
+
+            # update the label map
+            x0, y0, z0 = prediction_label_map.shape
+            self.label_map_data[:x0,:y0,:z0] = prediction_label_map
+            vtk_data_array = numpy_to_vtk(self.label_map_data.ravel(order='F'))
+            self.label_map.GetPointData().SetScalars(vtk_data_array)
+            self.model_view.updatePadding(self.label_map)
+
+            if self.plaque_pending and 1 in self.label_map_data:
+                self.plaque_pending = False
+                self.model_view.renderer.AddActor(self.model_view.actor_plaque)
                 self.model_view.renderer.AddActor(self.plaque_outline_actor3D)
+                self.model_view.renderer.ResetCamera()
+                if not self.editing_active:
+                    self.slice_view.renderer.AddActor(self.plaque_outline_actor2D)
+            if self.lumen_pending and 2 in self.label_map_data:
+                self.lumen_pending = False
+                self.model_view.renderer.AddActor(self.model_view.actor_lumen)
+                self.model_view.renderer.AddActor(self.lumen_outline_actor3D)
                 if not self.editing_active:
                     self.slice_view.renderer.AddActor(self.lumen_outline_actor2D)
-                    self.slice_view.renderer.AddActor(self.plaque_outline_actor2D)
-                self.slice_view.GetRenderWindow().Render()
-                self.model_view.GetRenderWindow().Render()
-                self.data_modified.emit()
+                self.model_view.renderer.ResetCamera()
+
+            # self.model_camera_pending = False
+            self.slice_view.GetRenderWindow().Render()
+            self.model_view.GetRenderWindow().Render()
+            self.data_modified.emit()
 
     
     def __loadLabelMapData(self):
@@ -805,14 +821,16 @@ class SegmentationModule(QTabWidget):
         super().__init__(parent)
         self.patient_dict = None
 
-        self.segmentation_module_left = SegmentationModuleTab()
-        self.segmentation_module_right = SegmentationModuleTab()
+        self.predictor = CarotidSegmentationPredictor()
+        self.segmentation_module_left = SegmentationModuleTab(self.predictor)
+        self.segmentation_module_right = SegmentationModuleTab(self.predictor)
 
         self.segmentation_module_left.data_modified.connect(self.dataModifiedLeft)
         self.segmentation_module_right.data_modified.connect(self.dataModifiedRight)
 
         self.addTab(self.segmentation_module_right, "Right")
         self.addTab(self.segmentation_module_left, "Left")
+
 
 
     def loadPatient(self, patient_dict):

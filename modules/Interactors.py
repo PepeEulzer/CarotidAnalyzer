@@ -228,10 +228,7 @@ class IsosurfaceInteractor(QVTKRenderWindowInteractor):
             label_map.GetPointData().SetScalars(vtk_data_array)
         
         # add padding
-        extent = np.array(label_map.GetExtent())
-        extent += np.array([-1, 1, -1, 1, -1, 1])
-        self.padding.SetInputData(label_map)
-        self.padding.SetOutputWholeExtent(extent)
+        self.updatePadding(label_map)
         
         # update the scene (pipeline triggers automatically)
         if 1.0 in img_raw:
@@ -251,6 +248,12 @@ class IsosurfaceInteractor(QVTKRenderWindowInteractor):
 
         # return pointer to label map if needed, return pending labels
         return label_map, plaque_pending, lumen_pending
+
+    def updatePadding(self, label_map):
+        extent = np.array(label_map.GetExtent())
+        extent += np.array([-1, 1, -1, 1, -1, 1])
+        self.padding.SetInputData(label_map)
+        self.padding.SetOutputWholeExtent(extent)
 
 
     def reset(self):
