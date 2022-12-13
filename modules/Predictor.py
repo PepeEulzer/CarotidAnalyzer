@@ -8,11 +8,13 @@ from monai.networks.nets import UNet
 from skimage import morphology
 from skimage.exposure import rescale_intensity
 
+from defaults import *
+
 class CarotidDataset(Dataset):
     """
     Subclass of torch dataset that contains a carotid volume.
     """
-    def __init__(self, img_data, filename, h=120, w=144, d=248, wl=415, ww=470):
+    def __init__(self, img_data, h=120, w=144, d=248, wl=415, ww=470):
         """
             Args:
             img_data (numpy array): image volume data
@@ -24,7 +26,6 @@ class CarotidDataset(Dataset):
         """
         self.img_data = np.copy(img_data)
         self.label = torch.zeros(img_data.shape)
-        self.filename = filename
 
         # crop if necessary
         h0, w0, d0 = self.img_data.shape
@@ -46,7 +47,7 @@ class CarotidDataset(Dataset):
 
 
     def __getitem__(self, idx):
-        return self.img_data, self.label, self.filename
+        return self.img_data, self.label
     
     def __len__(self):
         return 1
@@ -74,8 +75,8 @@ class CarotidSegmentationPredictor():
         self.dataloader = None
 
 
-    def setData(self, img_data, filename):
-        self.dataset = CarotidDataset(img_data, filename)
+    def setData(self, img_data):
+        self.dataset = CarotidDataset(img_data)
         self.dataloader = DataLoader(self.dataset, batch_size=1)
 
     
@@ -87,14 +88,20 @@ class CarotidSegmentationPredictor():
             output = self.model(img).squeeze(0)
             pred = torch.argmax(output, dim=0).cpu().numpy().astype(np.uint8)
 
-            # TODO postprocess
+            # postprocess
             pred = pred.astype(np.uint8)
             pred = np.rot90(pred, 0, axes=(1, 2))
+            pred = morphology.closing(pred) # close small gaps
+            region_label_img = morphology.label(pred, connectivity=2)
+            region_label_img[pred==1] = 0 # ignore plaque (TODO better method? remove only far away plaque?)
+            region_label_hist, _ = np.histogram(region_label_img, bins=np.max(region_label_img)+1)
+            for i in range(1, len(region_label_hist)):
+                cluster_size = region_label_hist[i]
+                if 0 < cluster_size < MIN_CLUSTER_SIZE:
+                    pred[region_label_img==i] = 0 # remove small clusters
+            pred = morphology.opening(pred) # remove spikes
         return pred
 
     def discard(self):
         self.dataset = None
         self.dataloader = None
-
-
-

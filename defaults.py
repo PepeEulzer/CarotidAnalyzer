@@ -21,3 +21,6 @@ SYM_UNSAVED_CHANGES = "\u25CF"
 # global execution flags
 EXPAND_PATIENTS = True
 SHOW_MODEL_MISMATCH_WARNING = False
+
+# global parameter constants
+MIN_CLUSTER_SIZE = 20000 # minimal cluster size (voxels) computed by automatic segmentation

@@ -369,8 +369,7 @@ class SegmentationModuleTab(QWidget):
         dlg.setStandardButtons(QMessageBox.Ok | QMessageBox.Cancel)
         button = dlg.exec()
         if button == QMessageBox.Ok:
-            # self.predictor = CarotidSegmentationPredictor()
-            self.predictor.setData(self.image_data, "test")
+            self.predictor.setData(self.image_data)
             prediction_label_map = self.predictor.run_inference()
 
             # update the label map
@@ -378,22 +377,24 @@ class SegmentationModuleTab(QWidget):
             self.label_map_data[:x0,:y0,:z0] = prediction_label_map
             vtk_data_array = numpy_to_vtk(self.label_map_data.ravel(order='F'))
             self.label_map.GetPointData().SetScalars(vtk_data_array)
-            self.model_view.updatePadding(self.label_map)
+            self.plaque_pending, self.lumen_pending = self.model_view.updateScene(self.label_map_data, self.label_map)
 
-            if self.plaque_pending and 1 in self.label_map_data:
-                self.plaque_pending = False
-                self.model_view.renderer.AddActor(self.model_view.actor_plaque)
+            # update scene actors
+            if self.plaque_pending:
+                self.model_view.renderer.RemoveActor(self.plaque_outline_actor3D)
+                self.slice_view.renderer.RemoveActor(self.plaque_outline_actor2D)
+            else:
                 self.model_view.renderer.AddActor(self.plaque_outline_actor3D)
-                self.model_view.renderer.ResetCamera()
                 if not self.editing_active:
                     self.slice_view.renderer.AddActor(self.plaque_outline_actor2D)
-            if self.lumen_pending and 2 in self.label_map_data:
-                self.lumen_pending = False
-                self.model_view.renderer.AddActor(self.model_view.actor_lumen)
+
+            if self.lumen_pending:
+                self.model_view.renderer.RemoveActor(self.lumen_outline_actor3D)
+                self.slice_view.renderer.RemoveActor(self.lumen_outline_actor2D)
+            else:
                 self.model_view.renderer.AddActor(self.lumen_outline_actor3D)
                 if not self.editing_active:
                     self.slice_view.renderer.AddActor(self.lumen_outline_actor2D)
-                self.model_view.renderer.ResetCamera()
 
             # self.model_camera_pending = False
             self.slice_view.GetRenderWindow().Render()

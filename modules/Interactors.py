@@ -193,12 +193,12 @@ class IsosurfaceInteractor(QVTKRenderWindowInteractor):
             label_map.SetOrigin(label_origin)
             vtk_data_array = numpy_to_vtk(img_data.ravel(order='F'))
             label_map.GetPointData().SetScalars(vtk_data_array)
-            img_raw = img_data
+            label_map_data = img_data
         else:
             src_origin = np.array(src_image.GetOrigin())
             src_spacing = np.array(src_image.GetSpacing())
             src_dim = np.array(src_image.GetDimensions())
-            img_raw = np.zeros(src_dim, dtype=np.uint8)
+            label_map_data = np.zeros(src_dim, dtype=np.uint8)
 
             if np.sign(label_spacing[0]) != np.sign(src_spacing[0]):
                 label_origin[0] += (label_dim[0]-1) * label_spacing[0]
@@ -216,7 +216,7 @@ class IsosurfaceInteractor(QVTKRenderWindowInteractor):
                 img_data_crop = img_data[-1*min(0, v[0]):min(label_dim[0],src_dim[0]-v[0]),
                                          -1*min(0, v[1]):min(label_dim[1],src_dim[1]-v[1]),
                                          -1*min(0, v[2]):min(label_dim[2],src_dim[2]-v[2])]
-                img_raw[max(0, v[0]):min(v[0]+label_dim[0], src_dim[0]),
+                label_map_data[max(0, v[0]):min(v[0]+label_dim[0], src_dim[0]),
                         max(0, v[1]):min(v[1]+label_dim[1], src_dim[1]),
                         max(0, v[2]):min(v[2]+label_dim[2], src_dim[2])] = img_data_crop
 
@@ -224,36 +224,39 @@ class IsosurfaceInteractor(QVTKRenderWindowInteractor):
             label_map.SetDimensions(src_dim)
             label_map.SetSpacing(src_spacing)
             label_map.SetOrigin(src_origin)
-            vtk_data_array = numpy_to_vtk(img_raw.ravel(order='F'))
+            vtk_data_array = numpy_to_vtk(label_map_data.ravel(order='F'))
             label_map.GetPointData().SetScalars(vtk_data_array)
         
-        # add padding
-        self.updatePadding(label_map)
+        # add padding, update scene actors
+        plaque_pending, lumen_pending = self.updateScene(label_map_data, label_map)
         
-        # update the scene (pipeline triggers automatically)
-        if 1.0 in img_raw:
+        # return pointer to label map if needed, return pending labels
+        return label_map, plaque_pending, lumen_pending
+
+    def updateScene(self, label_map_data, label_map_vtk):
+        extent = np.array(label_map_vtk.GetExtent())
+        extent += np.array([-1, 1, -1, 1, -1, 1])
+        self.padding.SetInputData(label_map_vtk)
+        self.padding.SetOutputWholeExtent(extent)
+
+        if 1.0 in label_map_data:
             self.renderer.AddActor(self.actor_plaque)
             plaque_pending = False
         else:
             self.renderer.RemoveActor(self.actor_plaque)
             plaque_pending = True
-        if 2.0 in img_raw:
+
+        if 2.0 in label_map_data:
             self.renderer.AddActor(self.actor_lumen)
             lumen_pending = False
         else:
             self.renderer.RemoveActor(self.actor_lumen)
             lumen_pending = True
+
         self.renderer.ResetCamera()
-        self.GetRenderWindow().Render()
+        # self.GetRenderWindow().Render()
 
-        # return pointer to label map if needed, return pending labels
-        return label_map, plaque_pending, lumen_pending
-
-    def updatePadding(self, label_map):
-        extent = np.array(label_map.GetExtent())
-        extent += np.array([-1, 1, -1, 1, -1, 1])
-        self.padding.SetInputData(label_map)
-        self.padding.SetOutputWholeExtent(extent)
+        return plaque_pending, lumen_pending
 
 
     def reset(self):
