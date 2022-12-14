@@ -1,4 +1,3 @@
-from cProfile import label
 import os
 
 import numpy as np
@@ -229,7 +228,7 @@ class IsosurfaceInteractor(QVTKRenderWindowInteractor):
         
         # add padding, update scene actors
         plaque_pending, lumen_pending = self.updateScene(label_map_data, label_map)
-        
+                
         # return pointer to label map if needed, return pending labels
         return label_map, plaque_pending, lumen_pending
 

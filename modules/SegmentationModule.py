@@ -260,7 +260,7 @@ class SegmentationModuleTab(QWidget):
             if self.draw3D:
                 self.sphere3D.SetCenter(position)  
             else:
-                self.circle3D.SetCenter(position)  
+                self.circle3D.SetCenter(position)
             self.model_view.GetRenderWindow().Render()
 
         # check what to update 
@@ -289,26 +289,36 @@ class SegmentationModuleTab(QWidget):
             if is_new_file:
                 self.image = self.slice_view.loadNrrd(volume_file)
                 self.__loadImageData()
-                self.brush_size = abs(self.image.GetSpacing()[0]*self.brush_size)  
+                self.brush_size = abs(self.image.GetSpacing()[0]*self.brush_size)
                 self.toolbar_edit.setEnabled(True)
                 self.slice_view_slider.setRange(
                     self.slice_view.min_slice,
                     self.slice_view.max_slice
                 )
-                self.slice_view_slider.setSliderPosition(self.slice_view.slice)  
+                self.slice_view_slider.setSliderPosition(self.slice_view.slice)
                 self.slice_view_slider.setEnabled(True)
                 
-
             # image exists -> load segmentation
             if seg_file:
                 self.label_map, self.plaque_pending, self.lumen_pending = self.model_view.loadNrrd(seg_file, self.image)
                 self.__loadLabelMapData()
                 self.model_camera_pending = False
-                self.model_view.renderer.AddActor(self.lumen_outline_actor3D)
-                self.model_view.renderer.AddActor(self.plaque_outline_actor3D)
-                if not self.editing_active:
-                    self.slice_view.renderer.AddActor(self.lumen_outline_actor2D)
-                    self.slice_view.renderer.AddActor(self.plaque_outline_actor2D)
+
+                if self.plaque_pending:
+                    self.model_view.renderer.RemoveActor(self.plaque_outline_actor3D)
+                    self.slice_view.renderer.RemoveActor(self.plaque_outline_actor2D)
+                else:
+                    self.model_view.renderer.AddActor(self.plaque_outline_actor3D)
+                    if not self.editing_active:
+                        self.slice_view.renderer.AddActor(self.plaque_outline_actor2D)
+                
+                if self.lumen_pending:
+                    self.model_view.renderer.RemoveActor(self.lumen_outline_actor3D)
+                    self.slice_view.renderer.RemoceActor(self.lumen_outline_actor2D)
+                else:
+                    self.model_view.renderer.AddActor(self.lumen_outline_actor3D)
+                    if not self.editing_active:
+                        self.slice_view.renderer.AddActor(self.lumen_outline_actor2D)
             
             # image exists -> create empty segmentation
             else:
@@ -396,7 +406,6 @@ class SegmentationModuleTab(QWidget):
                 if not self.editing_active:
                     self.slice_view.renderer.AddActor(self.lumen_outline_actor2D)
 
-            # self.model_camera_pending = False
             self.slice_view.GetRenderWindow().Render()
             self.model_view.GetRenderWindow().Render()
             self.data_modified.emit()
@@ -520,14 +529,14 @@ class SegmentationModuleTab(QWidget):
 
         # create circle mask
         axis = np.arange(-self.brush_size, self.brush_size+1, 1)
-        if self.draw3D == False:  
+        if not self.draw3D:  
             self.circle3D.SetRadius(self.brush_size * x_spacing)
             X, Y = np.meshgrid(axis, axis)  
             R = X**2 + Y**2
             R[R < self.brush_size**2] = 1
             R[R > 1] = 0
   
-        elif self.draw3D == True:  
+        else:  
             self.sphere3D.SetRadius(self.brush_size * x_spacing)
             z_scaling = abs(self.image.GetSpacing()[2]/self.image.GetSpacing()[0])
             self.brush_z = int(round(self.brush_size/z_scaling))
@@ -542,7 +551,6 @@ class SegmentationModuleTab(QWidget):
         self.model_view.GetRenderWindow().Render()
 
     def set2DBrush(self, on:bool):
-        
         if on:  # set up 2D brush 
             self.draw3D = False
             self.toolbar_brush3D.setChecked(False)
@@ -554,7 +562,6 @@ class SegmentationModuleTab(QWidget):
         self.markerVisible(self.marker)
         
     def set3DBrush(self, on:bool):
-        
         if on:  # set up 3D brush 
             self.draw3D = True
             self.toolbar_brush2D.setChecked(False)
@@ -650,7 +657,7 @@ class SegmentationModuleTab(QWidget):
             if self.draw3D:
                 self.sphere3D.SetCenter(position)  
             else:
-                self.circle3D.SetCenter(position)  
+                self.circle3D.SetCenter(position)
             self.model_view.GetRenderWindow().Render()
         
         self.slice_view.GetRenderWindow().Render()

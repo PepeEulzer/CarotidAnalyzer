@@ -7,7 +7,7 @@ from vtk.util.numpy_support import vtk_to_numpy
 from vtk.qt.QVTKRenderWindowInteractor import QVTKRenderWindowInteractor
 from PyQt5.QtWidgets import QWidget, QShortcut, QHBoxLayout, QTabWidget, QGraphicsPathItem
 from PyQt5.QtGui import QColor, QPainterPath, QKeySequence
-from PyQt5.QtCore import Qt, QRectF, QLineF, pyqtSignal
+from PyQt5.QtCore import Qt, QRectF, pyqtSignal
 import pyqtgraph as pg
 
 from defaults import *
