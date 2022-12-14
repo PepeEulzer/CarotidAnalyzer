@@ -42,33 +42,46 @@ class LineROI(pg.InfiniteLine):
     Draggable horizontal line that stops at branch boundaries in diameter plots.
     """
     def __init__(self, plot_id, x_start, x_end, y_pos=None, angle=90, pen=None, movable=False, y_bounds=None,
-                 hoverPen=None, label=None, labelOpts=None, name=None):
+                 hoverPen=None, label=None, labelOpts=None, span=(0, 1), markers=None, name=None):
         self.plot_id = plot_id
         self.x_start = x_start
         self.x_end = x_end
-        super().__init__(y_pos, angle, pen, movable, y_bounds, hoverPen, label, labelOpts, name)
+        super().__init__(y_pos, angle, pen, movable, y_bounds, hoverPen, label, labelOpts, span, markers, name)
 
 
-    def boundingRect(self):
-        if self._boundingRect is None:
-            br = self.viewRect()
-            if br is None:
-                return QRectF()
-            
-            # add a 4-pixel radius around the line for mouse interaction.
-            px = self.pixelLength(direction=pg.Point(1,0), ortho=True)  # get pixel length orthogonal to the line
-            if px is None:
-                px = 0
-            w = (max(4, self.pen.width()/2, self.hoverPen.width()/2)+1) * px
-            br.setBottom(-w)
-            br.setTop(w)
-            br.setRight(self.x_end)
-            br.setLeft(self.x_start)
-            
-            br = br.normalized()
-            self._boundingRect = br
-            self._line = QLineF(br.right(), 0.0, br.left(), 0.0)
-        return self._boundingRect
+    def _computeBoundingRect(self):
+        vr = self.viewRect()  # bounds of containing ViewBox mapped to local coords.
+        if vr is None:
+            return QRectF()
+        
+        px = self.pixelLength(direction=pg.Point(1,0), ortho=True)  # get pixel length orthogonal to the line
+        if px is None:
+            px = 0
+        pw = max(self.pen.width() / 2, self.hoverPen.width() / 2)
+        w = (self._maxMarkerSize + pw + 1) * px
+        br = QRectF(vr)
+        br.setBottom(-w)
+        br.setTop(w)
+
+        length = br.width()
+        left = br.left() + length
+        right = br.left() + length
+        br.setRight(self.x_end)
+        br.setLeft(self.x_start)
+        br = br.normalized()
+        
+        vs = self.getViewBox().size()
+        
+        if self._bounds != br or self._lastViewSize != vs:
+            self._bounds = br
+            self._lastViewSize = vs
+            self.prepareGeometryChange()
+        
+        self._endPoints = (self.x_start, self.x_end)
+        self._lastViewRect = vr
+        
+        return self._bounds
+
 
     def mouseDragEvent(self, ev):
         if self.movable and ev.button() == Qt.LeftButton:
