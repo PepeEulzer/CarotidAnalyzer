@@ -24,7 +24,7 @@ conda create -n CarotidAnalyzer pytorch torchvision torchaudio pytorch-cuda=11.7
 Then install other packages:
 ```
 conda activate CarotidAnalyzer
-conda install -c conda-forge monai pyqt vtk pynrrd pyqtgraph
+conda install -c conda-forge monai pyqt vtk vmtk pynrrd pyqtgraph
 conda install -c anaconda scikit-image
 ```
 

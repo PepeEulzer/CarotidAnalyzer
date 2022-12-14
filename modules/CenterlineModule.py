@@ -2,6 +2,7 @@ import os
 
 import vtk
 # from vmtk import vmtkscripts # temporarily disabled
+from vmtk.vtkvmtkComputationalGeometryPython import vtkvmtkPolyDataCenterlines
 from vtk.qt.QVTKRenderWindowInteractor import QVTKRenderWindowInteractor
 from PyQt5.QtCore import pyqtSignal
 from PyQt5.QtWidgets import QWidget, QVBoxLayout, QTabWidget, QPushButton
@@ -73,6 +74,64 @@ class CenterlineModuleTab(QWidget):
 
         print("Temporarily disabled.")
         return
+
+        # vtkCleanPolyData?
+        # vtkTriangleFilter?
+
+        # create idlists from seepoints
+        inletSeedIds = vtk.vtkIdList()
+        outletSeedIds = vtk.vtkIdList()
+        for id in self.SourceIds:
+            inletSeedIds.InsertNextId(id)
+        if self.TargetIds:
+            for id in self.TargetIds:
+                outletSeedIds.InsertNextId(id)
+
+        # create centerline filter
+        centerlineFilter = vtkvmtkPolyDataCenterlines()
+        centerlineFilter.SetInputData(centerlineInputSurface)
+        if self.SeedSelectorName in ['openprofiles','carotidprofiles','profileidlist']:
+            centerlineFilter.SetCapCenterIds(capCenterIds)
+        centerlineFilter.SetSourceSeedIds(inletSeedIds)
+        centerlineFilter.SetTargetSeedIds(outletSeedIds)
+        centerlineFilter.SetRadiusArrayName(self.RadiusArrayName)
+        centerlineFilter.SetCostFunction(self.CostFunction)
+        centerlineFilter.SetFlipNormals(self.FlipNormals)
+        centerlineFilter.SetAppendEndPointsToCenterlines(self.AppendEndPoints)
+        centerlineFilter.SetSimplifyVoronoi(self.SimplifyVoronoi)
+        if self.StopFastMarchingOnReachingTarget == True:
+            if outletSeedIds.GetNumberOfIds() != 1:
+                self.PrintError('Parameter Conflict: cannot enable "StopFastMarchingOnReachingTarget" when there is more then one target seed set.')
+            else:
+                centerlineFilter.SetStopFastMarchingOnReachingTarget(self.StopFastMarchingOnReachingTarget)
+        if self.DelaunayTessellation is not None:
+            centerlineFilter.GenerateDelaunayTessellationOff()
+            centerlineFilter.SetDelaunayTessellation(self.DelaunayTessellation)
+            centerlineFilter.SetDelaunayTolerance(self.DelaunayTolerance)
+        if (self.VoronoiDiagram is not None) and (self.PoleIds is not None):
+            centerlineFilter.GenerateVoronoiDiagramOff()
+            centerlineFilter.SetVoronoiDiagram(self.VoronoiDiagram)
+            centerlineFilter.SetPoleIds(self.PoleIds)
+            if self.SimplifyVoronoi == True:
+                centerlineFilter.SetSimplifyVoronoi(0)
+                self.PrintLog('Note: requested behavior (SimplifyVoronoi = True) over-ridden.',1)
+                self.PrintLog('Cannot simplify Voronoi Diagram when precomputed input is specified.',1)
+        
+        centerlineFilter.SetCenterlineResampling(self.Resampling)
+        centerlineFilter.SetResamplingStepLength(self.ResamplingStepLength)
+        centerlineFilter.Update()
+
+        self.Centerlines = centerlineFilter.GetOutput()
+        self.VoronoiDiagram = centerlineFilter.GetVoronoiDiagram()
+        self.DelaunayTessellation = centerlineFilter.GetDelaunayTessellation()
+        self.PoleIds = centerlineFilter.GetPoleIds()
+
+        self.EikonalSolutionArrayName = centerlineFilter.GetEikonalSolutionArrayName()
+        self.EdgeArrayName = centerlineFilter.GetEdgeArrayName()
+        self.EdgePCoordArrayName = centerlineFilter.GetEdgePCoordArrayName()
+        self.CostFunctionArrayName = centerlineFilter.GetCostFunctionArrayName()
+
+        
         # centerlines_script = vmtkscripts.vmtkCenterlines()
         # centerlines_script.Surface = self.reader_lumen.GetOutput()
         # centerlines_script.Execute()
