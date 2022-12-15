@@ -20,7 +20,7 @@ class CenterlineModuleTab(QWidget):
         self.DelaunayTessellation = None
         self.VoronoiDiagram = None
         self.PoleIds = None
-        self.SourceIds = []
+        self.SourceId = None
         self.TargetIds = []
 
         self.button_compute = QPushButton("Compute New Centerlines")
@@ -82,10 +82,8 @@ class CenterlineModuleTab(QWidget):
         # pick selected position
         x_screen, y_screen = self.centerline_view.GetEventPosition()
         self.picker.Pick(x_screen, y_screen, 0, self.renderer)
-        position = self.picker.GetPickPosition()
         pointId = self.picker.GetPointId()
-        print("Position: ", position)
-        print("Point ID:", pointId)
+        position = self.reader_lumen.GetOutput().GetPoint(pointId)
         
         # create sphere actor
         sphere = vtk.vtkSphereSource()
@@ -97,7 +95,7 @@ class CenterlineModuleTab(QWidget):
         sphere_mapper.SetInputConnection(sphere.GetOutputPort())
 
         if self.pick_source:
-            self.SourceIds.append(pointId)
+            self.SourceId = pointId
             self.actor_source.SetMapper(sphere_mapper)
             self.actor_source.GetProperty().SetColor(0.2, 1, 0.2)
             self.renderer.AddActor(self.actor_source)
@@ -117,11 +115,8 @@ class CenterlineModuleTab(QWidget):
         if not self.lumen_active:
             print("No lumen to compute centerlines from.")
             return
-        elif len(self.SourceIds) < 1:
+        elif self.SourceId is None:
             print("No source point specified.")
-            return
-        elif len(self.SourceIds) > 1:
-            print("More than one source point specified.")
             return
         elif len(self.TargetIds) < 1:
             print("No target points specified.")
@@ -129,12 +124,10 @@ class CenterlineModuleTab(QWidget):
 
         # create idlists from seepoints
         inletSeedIds = vtk.vtkIdList()
+        inletSeedIds.InsertNextId(self.SourceId)
         outletSeedIds = vtk.vtkIdList()
-        for id in self.SourceIds:
-            inletSeedIds.InsertNextId(id)
-        if self.TargetIds:
-            for id in self.TargetIds:
-                outletSeedIds.InsertNextId(id)
+        for id in self.TargetIds:
+            outletSeedIds.InsertNextId(id)
 
         # create centerline filter
         centerlineFilter = vtkvmtkPolyDataCenterlines()
@@ -188,7 +181,7 @@ class CenterlineModuleTab(QWidget):
         self.DelaunayTessellation = None
         self.VoronoiDiagram = None
         self.PoleIds = None
-        self.SourceIds.clear()
+        self.SourceId = None
         self.TargetIds.clear()
         self.pick_source = True
         self.renderer.RemoveActor(self.actor_source)
