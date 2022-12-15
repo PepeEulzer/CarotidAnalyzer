@@ -1,7 +1,6 @@
 import os
 
 import vtk
-# from vmtk import vmtkscripts # temporarily disabled
 from vmtk.vtkvmtkComputationalGeometryPython import vtkvmtkPolyDataCenterlines
 from vtk.qt.QVTKRenderWindowInteractor import QVTKRenderWindowInteractor
 from PyQt5.QtCore import pyqtSignal
@@ -18,11 +17,17 @@ class CenterlineModuleTab(QWidget):
         super().__init__(parent)
         self.lumen_active = False
         self.centerlines = None
+        self.DelaunayTessellation = None
+        self.VoronoiDiagram = None
+        self.PoleIds = None
+        self.SourceIds = []
+        self.TargetIds = []
 
         self.button_compute = QPushButton("Compute New Centerlines")
         self.button_compute.clicked.connect(self.computeCenterlines)
+        self.interactor_style = vtk.vtkInteractorStyleTrackballCamera()
         self.centerline_view = QVTKRenderWindowInteractor(self)
-        self.centerline_view.SetInteractorStyle(vtk.vtkInteractorStyleTrackballCamera())
+        self.centerline_view.SetInteractorStyle(self.interactor_style)
         self.renderer = vtk.vtkRenderer()
         self.renderer.SetBackground(1,1,1)
         cam = self.renderer.GetActiveCamera()
@@ -54,6 +59,13 @@ class CenterlineModuleTab(QWidget):
         self.actor_centerline.GetProperty().SetLineWidth(3)
         self.actor_centerline.GetProperty().RenderLinesAsTubesOn()
 
+        # picking objects and observers
+        self.pick_source = True
+        self.picker = vtk.vtkPointPicker()
+        self.pickPointEvent = self.interactor_style.AddObserver("RightButtonPressEvent", self.pickCenterlineEndPoint)
+        self.actor_source = vtk.vtkActor()
+        self.actors_targets = []
+
         # other vtk props
         self.text_patient = vtk.vtkTextActor()
         self.text_patient.SetInput("No segmentation file found for this side.")
@@ -66,17 +78,54 @@ class CenterlineModuleTab(QWidget):
         self.centerline_view.Start()
 
 
+    def pickCenterlineEndPoint(self, obj, event):
+        # pick selected position
+        x_screen, y_screen = self.centerline_view.GetEventPosition()
+        self.picker.Pick(x_screen, y_screen, 0, self.renderer)
+        position = self.picker.GetPickPosition()
+        pointId = self.picker.GetPointId()
+        print("Position: ", position)
+        print("Point ID:", pointId)
+        
+        # create sphere actor
+        sphere = vtk.vtkSphereSource()
+        sphere.SetThetaResolution(20)
+        sphere.SetPhiResolution(20)
+        sphere.SetRadius(1)
+        sphere.SetCenter(position)
+        sphere_mapper = vtk.vtkPolyDataMapper()
+        sphere_mapper.SetInputConnection(sphere.GetOutputPort())
+
+        if self.pick_source:
+            self.SourceIds.append(pointId)
+            self.actor_source.SetMapper(sphere_mapper)
+            self.actor_source.GetProperty().SetColor(0.2, 1, 0.2)
+            self.renderer.AddActor(self.actor_source)
+            self.pick_source = False
+        else:
+            self.TargetIds.append(pointId)
+            actor_target = vtk.vtkActor()
+            actor_target.SetMapper(sphere_mapper)
+            actor_target.GetProperty().SetColor(1, 0.2, 0.2)
+            self.renderer.AddActor(actor_target)
+            self.actors_targets.append(actor_target)
+        self.centerline_view.GetRenderWindow().Render()
+        
+
     def computeCenterlines(self):
-        # TODO threading + windowless computation?
+        # TODO threading?
         if not self.lumen_active:
             print("No lumen to compute centerlines from.")
             return
-
-        print("Temporarily disabled.")
-        return
-
-        # vtkCleanPolyData?
-        # vtkTriangleFilter?
+        elif len(self.SourceIds) < 1:
+            print("No source point specified.")
+            return
+        elif len(self.SourceIds) > 1:
+            print("More than one source point specified.")
+            return
+        elif len(self.TargetIds) < 1:
+            print("No target points specified.")
+            return
 
         # create idlists from seepoints
         inletSeedIds = vtk.vtkIdList()
@@ -89,57 +138,38 @@ class CenterlineModuleTab(QWidget):
 
         # create centerline filter
         centerlineFilter = vtkvmtkPolyDataCenterlines()
-        centerlineFilter.SetInputData(centerlineInputSurface)
-        if self.SeedSelectorName in ['openprofiles','carotidprofiles','profileidlist']:
-            centerlineFilter.SetCapCenterIds(capCenterIds)
+        centerlineFilter.SetInputData(self.reader_lumen.GetOutput())
         centerlineFilter.SetSourceSeedIds(inletSeedIds)
         centerlineFilter.SetTargetSeedIds(outletSeedIds)
-        centerlineFilter.SetRadiusArrayName(self.RadiusArrayName)
-        centerlineFilter.SetCostFunction(self.CostFunction)
-        centerlineFilter.SetFlipNormals(self.FlipNormals)
-        centerlineFilter.SetAppendEndPointsToCenterlines(self.AppendEndPoints)
-        centerlineFilter.SetSimplifyVoronoi(self.SimplifyVoronoi)
-        if self.StopFastMarchingOnReachingTarget == True:
-            if outletSeedIds.GetNumberOfIds() != 1:
-                self.PrintError('Parameter Conflict: cannot enable "StopFastMarchingOnReachingTarget" when there is more then one target seed set.')
-            else:
-                centerlineFilter.SetStopFastMarchingOnReachingTarget(self.StopFastMarchingOnReachingTarget)
-        if self.DelaunayTessellation is not None:
+        centerlineFilter.SetRadiusArrayName('MaximumInscribedSphereRadius')
+        centerlineFilter.SetFlipNormals(False)
+        centerlineFilter.SetAppendEndPointsToCenterlines(False)
+        centerlineFilter.SetStopFastMarchingOnReachingTarget(False) # could be enabled for 1 target
+        centerlineFilter.SetSimplifyVoronoi(False)
+        if self.DelaunayTessellation != None:
             centerlineFilter.GenerateDelaunayTessellationOff()
             centerlineFilter.SetDelaunayTessellation(self.DelaunayTessellation)
-            centerlineFilter.SetDelaunayTolerance(self.DelaunayTolerance)
         if (self.VoronoiDiagram is not None) and (self.PoleIds is not None):
             centerlineFilter.GenerateVoronoiDiagramOff()
             centerlineFilter.SetVoronoiDiagram(self.VoronoiDiagram)
             centerlineFilter.SetPoleIds(self.PoleIds)
-            if self.SimplifyVoronoi == True:
-                centerlineFilter.SetSimplifyVoronoi(0)
-                self.PrintLog('Note: requested behavior (SimplifyVoronoi = True) over-ridden.',1)
-                self.PrintLog('Cannot simplify Voronoi Diagram when precomputed input is specified.',1)
-        
-        centerlineFilter.SetCenterlineResampling(self.Resampling)
-        centerlineFilter.SetResamplingStepLength(self.ResamplingStepLength)
+    
+        # execute centerline filter
+        centerlineFilter.SetCenterlineResampling(False)
+        centerlineFilter.SetResamplingStepLength(1.0)
         centerlineFilter.Update()
 
-        self.Centerlines = centerlineFilter.GetOutput()
+        # cache output
+        self.centerlines = centerlineFilter.GetOutput()
         self.VoronoiDiagram = centerlineFilter.GetVoronoiDiagram()
         self.DelaunayTessellation = centerlineFilter.GetDelaunayTessellation()
         self.PoleIds = centerlineFilter.GetPoleIds()
 
-        self.EikonalSolutionArrayName = centerlineFilter.GetEikonalSolutionArrayName()
-        self.EdgeArrayName = centerlineFilter.GetEdgeArrayName()
-        self.EdgePCoordArrayName = centerlineFilter.GetEdgePCoordArrayName()
-        self.CostFunctionArrayName = centerlineFilter.GetCostFunctionArrayName()
-
-        
-        # centerlines_script = vmtkscripts.vmtkCenterlines()
-        # centerlines_script.Surface = self.reader_lumen.GetOutput()
-        # centerlines_script.Execute()
-        # self.centerlines = centerlines_script.Centerlines
-        # self.mapper_centerline.SetInputData(self.centerlines)
-        # self.renderer.AddActor(self.actor_centerline)
-        # self.centerline_view.GetRenderWindow().Render()
-        # self.data_modified.emit()
+        # show output and propagate
+        self.mapper_centerline.SetInputData(self.centerlines)
+        self.renderer.AddActor(self.actor_centerline)
+        self.centerline_view.GetRenderWindow().Render()
+        self.data_modified.emit()
 
 
     def showEvent(self, event):
@@ -155,6 +185,18 @@ class CenterlineModuleTab(QWidget):
     
 
     def loadModels(self, lumen_file, centerline_file):
+        self.DelaunayTessellation = None
+        self.VoronoiDiagram = None
+        self.PoleIds = None
+        self.SourceIds.clear()
+        self.TargetIds.clear()
+        self.pick_source = True
+        self.renderer.RemoveActor(self.actor_source)
+        for actor in self.actors_targets:
+            self.renderer.RemoveActor(actor)
+        self.actor_source = vtk.vtkActor()
+        self.actors_targets.clear()
+
         if lumen_file:
             self.reader_lumen.SetFileName("") # forces a reload
             self.reader_lumen.SetFileName(lumen_file)
