@@ -4,7 +4,7 @@ import vtk
 from vmtk.vtkvmtkComputationalGeometryPython import vtkvmtkPolyDataCenterlines
 from vtk.qt.QVTKRenderWindowInteractor import QVTKRenderWindowInteractor
 from PyQt5.QtCore import pyqtSignal
-from PyQt5.QtWidgets import QWidget, QVBoxLayout, QTabWidget, QPushButton
+from PyQt5.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QTabWidget, QPushButton, QLabel
 
 from defaults import *
 
@@ -23,8 +23,17 @@ class CenterlineModuleTab(QWidget):
         self.SourceId = None
         self.TargetIds = []
 
+        # QT UI
         self.button_compute = QPushButton("Compute New Centerlines")
         self.button_compute.clicked.connect(self.computeCenterlines)
+        self.button_set_source = QPushButton("Source")
+        self.button_set_source.setCheckable(True)
+        self.button_set_source.clicked[bool].connect(self.setSourcePoint)
+        self.button_set_target = QPushButton("Target")
+        self.button_set_target.setCheckable(True)
+        self.button_set_target.clicked[bool].connect(self.setTargetPoints)
+
+        # VTK UI
         self.interactor_style = vtk.vtkInteractorStyleTrackballCamera()
         self.centerline_view = QVTKRenderWindowInteractor(self)
         self.centerline_view.SetInteractorStyle(self.interactor_style)
@@ -35,10 +44,23 @@ class CenterlineModuleTab(QWidget):
         cam.SetFocalPoint(0, 0, 0)
         cam.SetViewUp(0, -1, 0)
         self.centerline_view.GetRenderWindow().AddRenderer(self.renderer)
+        self.text_patient = vtk.vtkTextActor()
+        self.text_patient.SetInput("No segmentation file found for this side.")
+        self.text_patient.SetDisplayPosition(10, 10)
+        self.text_patient.GetTextProperty().SetColor(0, 0, 0)
+        self.text_patient.GetTextProperty().SetFontSize(20)
+        self.renderer.AddActor(self.text_patient)
 
-        self.slice_view_layout = QVBoxLayout(self)
-        self.slice_view_layout.addWidget(self.button_compute)
-        self.slice_view_layout.addWidget(self.centerline_view)
+        # add everything to a layout
+        self.button_layout = QHBoxLayout()
+        self.button_layout.addWidget(QLabel("Set new centerline endpoints: "))
+        self.button_layout.addWidget(self.button_set_source)
+        self.button_layout.addWidget(self.button_set_target)
+        self.button_layout.addStretch()
+        self.button_layout.addWidget(self.button_compute)
+        self.main_layout = QVBoxLayout(self)
+        self.main_layout.addLayout(self.button_layout)
+        self.main_layout.addWidget(self.centerline_view)
 
         # lumen vtk pipeline
         self.reader_lumen = vtk.vtkSTLReader()
@@ -47,7 +69,7 @@ class CenterlineModuleTab(QWidget):
         self.actor_lumen = vtk.vtkActor()
         self.actor_lumen.SetMapper(self.mapper_lumen)
         self.actor_lumen.GetProperty().SetColor(COLOR_LUMEN)
-        self.actor_lumen.GetProperty().SetOpacity(0.3)
+        self.actor_lumen.GetProperty().SetOpacity(0.4)
 
         # centerline vtk pipeline
         self.reader_centerline = vtk.vtkXMLPolyDataReader()
@@ -59,30 +81,58 @@ class CenterlineModuleTab(QWidget):
         self.actor_centerline.GetProperty().SetLineWidth(3)
         self.actor_centerline.GetProperty().RenderLinesAsTubesOn()
 
-        # picking objects and observers
+        # picking
         self.pick_source = True
-        self.picker = vtk.vtkPointPicker()
-        self.pickPointEvent = self.interactor_style.AddObserver("RightButtonPressEvent", self.pickCenterlineEndPoint)
+        self.picker = vtk.vtkCellPicker()
+        self.picker.SetTolerance(0.0005)
+        self.pickPointEvent = None
         self.actor_source = vtk.vtkActor()
         self.actors_targets = []
 
-        # other vtk props
-        self.text_patient = vtk.vtkTextActor()
-        self.text_patient.SetInput("No segmentation file found for this side.")
-        self.text_patient.SetDisplayPosition(10, 10)
-        self.text_patient.GetTextProperty().SetColor(0, 0, 0)
-        self.text_patient.GetTextProperty().SetFontSize(20)
-        self.renderer.AddActor(self.text_patient)
-
+        # start render window
         self.centerline_view.Initialize()
         self.centerline_view.Start()
+
+
+    def setEditPointsMode(self, edit_on):
+        if edit_on:
+            if self.pickPointEvent is None:
+                self.pickPointEvent = self.interactor_style.AddObserver("RightButtonPressEvent", self.pickCenterlineEndPoint)
+            self.actor_lumen.GetProperty().SetOpacity(1.0)
+            self.renderer.RemoveActor(self.actor_centerline)
+        else:
+            if self.pickPointEvent is not None:
+                self.interactor_style.RemoveObserver(self.pickPointEvent)
+                self.pickPointEvent = None
+            self.actor_lumen.GetProperty().SetOpacity(0.4)
+            self.renderer.AddActor(self.actor_centerline) # TODO catch if no centerline exists
+        self.centerline_view.GetRenderWindow().Render()
+
+
+    def setSourcePoint(self, pushed):
+        if pushed:
+            self.setEditPointsMode(True)
+            self.button_set_target.setChecked(False)
+            self.pick_source = True
+        else:
+            self.setEditPointsMode(False)
+
+
+    def setTargetPoints(self, pushed):
+        if pushed:
+            self.setEditPointsMode(True)
+            self.button_set_source.setChecked(False)
+            self.pick_source = False
+        else:
+            self.setEditPointsMode(False)
 
 
     def pickCenterlineEndPoint(self, obj, event):
         # pick selected position
         x_screen, y_screen = self.centerline_view.GetEventPosition()
         self.picker.Pick(x_screen, y_screen, 0, self.renderer)
-        pointId = self.picker.GetPointId()
+        position = self.picker.GetPickPosition()
+        pointId = self.reader_lumen.GetOutput().FindPoint(position)
         position = self.reader_lumen.GetOutput().GetPoint(pointId)
         
         # create sphere actor
@@ -99,7 +149,6 @@ class CenterlineModuleTab(QWidget):
             self.actor_source.SetMapper(sphere_mapper)
             self.actor_source.GetProperty().SetColor(0.2, 1, 0.2)
             self.renderer.AddActor(self.actor_source)
-            self.pick_source = False
         else:
             self.TargetIds.append(pointId)
             actor_target = vtk.vtkActor()
@@ -161,7 +210,9 @@ class CenterlineModuleTab(QWidget):
         # show output and propagate
         self.mapper_centerline.SetInputData(self.centerlines)
         self.renderer.AddActor(self.actor_centerline)
-        self.centerline_view.GetRenderWindow().Render()
+        self.button_set_source.setChecked(False)
+        self.button_set_target.setChecked(False)
+        self.setEditPointsMode(False)
         self.data_modified.emit()
 
 
