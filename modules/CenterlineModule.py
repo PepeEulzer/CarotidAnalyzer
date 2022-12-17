@@ -32,6 +32,8 @@ class CenterlineModuleTab(QWidget):
         self.button_set_target = QPushButton("Target")
         self.button_set_target.setCheckable(True)
         self.button_set_target.clicked[bool].connect(self.setTargetPoints)
+        self.button_remove_target = QPushButton("Remove Targets")
+        self.button_remove_target.clicked.connect(self.removeTargetPoints)
 
         # VTK UI
         self.interactor_style = vtk.vtkInteractorStyleTrackballCamera()
@@ -56,6 +58,8 @@ class CenterlineModuleTab(QWidget):
         self.button_layout.addWidget(QLabel("Set new centerline endpoints: "))
         self.button_layout.addWidget(self.button_set_source)
         self.button_layout.addWidget(self.button_set_target)
+        self.button_layout.addWidget(QLabel("|"))
+        self.button_layout.addWidget(self.button_remove_target)
         self.button_layout.addStretch()
         self.button_layout.addWidget(self.button_compute)
         self.main_layout = QVBoxLayout(self)
@@ -126,11 +130,27 @@ class CenterlineModuleTab(QWidget):
         else:
             self.setEditPointsMode(False)
 
+    
+    def removeTargetPoints(self):
+        for actor in self.actors_targets:
+            self.renderer.RemoveActor(actor)
+        self.TargetIds.clear()
+        self.centerline_view.GetRenderWindow().Render()
+
 
     def pickCenterlineEndPoint(self, obj, event):
         # pick selected position
         x_screen, y_screen = self.centerline_view.GetEventPosition()
         self.picker.Pick(x_screen, y_screen, 0, self.renderer)
+        picked_actor = self.picker.GetActor()
+        for i in range(len(self.actors_targets)):
+            # remove point if actor was clicked
+            if picked_actor == self.actors_targets[i]:
+                self.renderer.RemoveActor(picked_actor)
+                self.actors_targets.pop(i)
+                self.TargetIds.pop(i)
+                self.centerline_view.GetRenderWindow().Render()
+                return
         position = self.picker.GetPickPosition()
         pointId = self.reader_lumen.GetOutput().FindPoint(position)
         position = self.reader_lumen.GetOutput().GetPoint(pointId)
