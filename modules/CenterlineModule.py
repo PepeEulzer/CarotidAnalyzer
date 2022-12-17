@@ -34,6 +34,8 @@ class CenterlineModuleTab(QWidget):
         self.button_set_target.clicked[bool].connect(self.setTargetPoints)
         self.button_remove_target = QPushButton("Remove Targets")
         self.button_remove_target.clicked.connect(self.removeTargetPoints)
+        self.label_picker_hint = QLabel(r"<b>Right-click on the surface to add endpoints.</b><br>Right-click a target point to remove it. One source and one or more targets need to be defined.")
+        self.label_picker_hint.setVisible(False)
 
         # VTK UI
         self.interactor_style = vtk.vtkInteractorStyleTrackballCamera()
@@ -55,7 +57,7 @@ class CenterlineModuleTab(QWidget):
 
         # add everything to a layout
         self.button_layout = QHBoxLayout()
-        self.button_layout.addWidget(QLabel("Set new centerline endpoints: "))
+        self.button_layout.addWidget(QLabel("Set new centerline endpoints:"))
         self.button_layout.addWidget(self.button_set_source)
         self.button_layout.addWidget(self.button_set_target)
         self.button_layout.addWidget(QLabel("|"))
@@ -64,6 +66,7 @@ class CenterlineModuleTab(QWidget):
         self.button_layout.addWidget(self.button_compute)
         self.main_layout = QVBoxLayout(self)
         self.main_layout.addLayout(self.button_layout)
+        self.main_layout.addWidget(self.label_picker_hint)
         self.main_layout.addWidget(self.centerline_view)
 
         # lumen vtk pipeline
@@ -104,12 +107,14 @@ class CenterlineModuleTab(QWidget):
                 self.pickPointEvent = self.interactor_style.AddObserver("RightButtonPressEvent", self.pickCenterlineEndPoint)
             self.actor_lumen.GetProperty().SetOpacity(1.0)
             self.renderer.RemoveActor(self.actor_centerline)
+            self.label_picker_hint.setVisible(True)
         else:
             if self.pickPointEvent is not None:
                 self.interactor_style.RemoveObserver(self.pickPointEvent)
                 self.pickPointEvent = None
             self.actor_lumen.GetProperty().SetOpacity(0.4)
             self.renderer.AddActor(self.actor_centerline) # TODO catch if no centerline exists
+            self.label_picker_hint.setVisible(False)
         self.centerline_view.GetRenderWindow().Render()
 
 
