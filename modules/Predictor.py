@@ -58,7 +58,7 @@ class CarotidSegmentationPredictor():
     """
     def __init__(self):
         self.device = 'cuda' if torch.cuda.is_available() else 'cpu'
-        self.weights = 'C:\\Git\\carotid-segmentation\\models\\best_model2022-03-12.pth' # TODO adapt path
+        self.weights = 'seg_model_weights.pth'
         self.model = UNet(spatial_dims=3,
                           in_channels=1,
                           out_channels=3,
