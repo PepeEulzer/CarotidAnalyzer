@@ -122,24 +122,21 @@ class CarotidAnalyzer(QMainWindow, Ui_MainWindow):
             header['encoding'] = 'gzip'
             header['space origin'] = pos
             nrrd.write(nrrd_path, data_array, header)
-        else:
-            # only save pixel data as vtkimage
-            image = vtk.vtkImageData()
-            image.SetDimensions(dim_x,dim_y,dim_z)
-            image.SetSpacing(s_x_y[0], s_x_y[1], s_z)
-            image.SetOrigin(pos)
-            vtk_data_array = numpy_to_vtk(data_array.ravel(order='F'))
-            image.GetPointData().SetScalars(vtk_data_array)
+        
+        # save pixel data as vtkimage
+        image = vtk.vtkImageData()
+        image.SetDimensions(dim_x,dim_y,dim_z)
+        image.SetSpacing(s_x_y[0], s_x_y[1], s_z)
+        image.SetOrigin(pos)
+        vtk_data_array = numpy_to_vtk(data_array.ravel(order='F'))
+        image.GetPointData().SetScalars(vtk_data_array)
 
         # update tree widget, load patient
         self.setWorkingDir(self.working_dir)   
         for patient in self.patient_data:
             if patient['patient_ID'] == dir_name:
                 self.active_patient_dict = patient
-                if save_nrrd == QMessageBox.No:
-                    self.crop_module.loadPatient(patient, image)
-                else: 
-                    self.crop_module.loadPatient(patient)
+                self.crop_module.loadPatient(patient, image)
                 self.segmentation_module.loadPatient(patient)
                 self.centerline_module.loadPatient(patient)
                 self.stenosis_classifier.loadPatient(patient)
@@ -152,26 +149,32 @@ class CarotidAnalyzer(QMainWindow, Ui_MainWindow):
                     break
         self.setPatientTreeItemColor(self.active_patient_tree_widget_item, COLOR_SELECTED)
 
-    
     def openDICOMDirDialog(self): 
         # set path for dcm file
         source_dir = QFileDialog.getExistingDirectory(self, "Set source Directory for DICOM files")
         
-        # userinput for target filename
+        # userinput for target filename if dcm path set 
         if source_dir:
             dir_name, ok = QInputDialog.getText(self, "Set patient Directory", "Enter name of Directory for patient data starting with 'patient':")
+            # check if directory exists, if yes -> open new dialog and check again 
             if dir_name and ok:
-                # check if name correct so that data can be found later 
-                if not dir_name.startswith('patient'):
-                    dir_name = "patient_" + dir_name
-                    print("Name for directory does not start with 'patient'! New name:", dir_name)
-                # make directory 
-                path = os.path.join(self.working_dir, dir_name) 
-                os.mkdir(path)
-                os.mkdir(os.path.join(path, "models"))
-                self.loadNewDICOM(source_dir, dir_name)
+                while os.path.exists(os.path.join(self.working_dir, dir_name)) or os.path.exists(os.path.join(self.working_dir,("patient_" + dir_name))):
+                    dir_name, ok = QInputDialog.getText(self, "Set patient Directory", "Directory/Patient allready exists! Please choose another name starting with 'patient':")
+                    # break if dialog canceled by user 
+                    if not ok: 
+                        break
 
-
+                if dir_name and ok: 
+                    # check if name correct so that data can be found later 
+                    if not dir_name.startswith('patient'):
+                        dir_name = "patient_" + dir_name
+                        print("Name for directory does not start with 'patient'! New name:", dir_name)
+                    # create directory 
+                    path = os.path.join(self.working_dir, dir_name) 
+                    os.mkdir(path)
+                    os.mkdir(os.path.join(path, "models"))
+                    self.loadNewDICOM(source_dir, dir_name)
+                
     def setWorkingDir(self, dir):
         if len(dir) <= 0:
             return
