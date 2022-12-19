@@ -1,11 +1,17 @@
 import os
 import sys
 import glob
+from collections import OrderedDict
 
+import numpy as np 
+import nrrd
+import pydicom
+import vtk
+from vtk.util.numpy_support import numpy_to_vtk
 from PyQt5.QtCore import QSettings, QVariant
 from PyQt5.QtWidgets import (
     QApplication, QFileDialog, QMainWindow, QMessageBox, 
-    QTreeWidgetItem
+    QTreeWidgetItem, QInputDialog
 )
 from PyQt5.QtGui import QColor
 
@@ -49,7 +55,7 @@ class CarotidAnalyzer(QMainWindow, Ui_MainWindow):
         ]
         
         # connect signals to slots
-        self.action_load_new_DICOM.triggered.connect(self.loadNewDICOM)
+        self.action_load_new_DICOM.triggered.connect(self.openDICOMDirDialog)
         self.action_set_working_directory.triggered.connect(self.openWorkingDirDialog)
         self.action_data_inspector.triggered[bool].connect(self.viewDataInspector)
         self.action_crop_module.triggered[bool].connect(self.viewCropModule)
@@ -81,13 +87,94 @@ class CarotidAnalyzer(QMainWindow, Ui_MainWindow):
         dir = settings.value("LastWorkingDir")
         if dir != None:
             self.setWorkingDir(dir)
+ 
+    def loadNewDICOM(self, source_dir, dir_name):
+        data = []
+        path = os.listdir(source_dir)
 
+        # read in each dcm and save pixel data
+        for file in path:
+            ds = pydicom.dcmread(os.path.join(source_dir, file))
+            data.append(ds.pixel_array)
+        data_array = np.transpose(np.array(data))
 
-    def loadNewDICOM(self):
-        print("Call file dialog. Load a DICOM dataset")
-        print("NOT IMPLEMENTED")
+        # get meatdata for header/vtkImage
+        dicomdata = pydicom.dcmread(os.path.join(source_dir, path[0]))
+        dim_x, dim_y, dim_z = data_array.shape
+        s_z = float(dicomdata[0x0018,0x0088].value)  # spacing between slices 
+        s_x_y = dicomdata[0x0028,0x0030].value  # pixel spacing 
+        pos = dicomdata[0x0020,0x0032].value  # image position
 
-    
+        # user input if dicom data should be saved in nrrd
+        save_nrrd = QMessageBox.question(self, 'Save Full Volume', "Should the full volume be saved in a .nrrd file?", QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
+        if save_nrrd == QMessageBox.Yes:
+            # save as nrrd 
+            filename = dir_name + ".nrrd"
+            nrrd_path = os.path.join(self.working_dir, dir_name, filename)
+            header = OrderedDict()
+            header['type'] = 'int16'
+            header['dimension'] = 3
+            header['space'] = 'left-posterior-superior'
+            header['sizes'] =  str(dim_x) + str(dim_y) + str(dim_z) 
+            header['space directions'] = [[s_x_y[0], 0.0, 0.0], [0.0, s_x_y[1], 0.0], [0.0, 0.0,s_z]]
+            header['kinds'] = ['domain', 'domain', 'domain']
+            header['endian'] = 'little'
+            header['encoding'] = 'gzip'
+            header['space origin'] = pos
+            nrrd.write(nrrd_path, data_array, header)
+        
+        # save pixel data as vtkimage
+        image = vtk.vtkImageData()
+        image.SetDimensions(dim_x,dim_y,dim_z)
+        image.SetSpacing(s_x_y[0], s_x_y[1], s_z)
+        image.SetOrigin(pos)
+        vtk_data_array = numpy_to_vtk(data_array.ravel(order='F'))
+        image.GetPointData().SetScalars(vtk_data_array)
+
+        # update tree widget, load patient
+        self.setWorkingDir(self.working_dir)   
+        for patient in self.patient_data:
+            if patient['patient_ID'] == dir_name:
+                self.active_patient_dict = patient
+                self.crop_module.loadPatient(patient, image)
+                self.segmentation_module.loadPatient(patient)
+                self.centerline_module.loadPatient(patient)
+                self.stenosis_classifier.loadPatient(patient)
+                break
+        
+        # set as activated widget
+        for i in range(self.tree_widget_data.topLevelItemCount()):
+                if self.tree_widget_data.topLevelItem(i).text(0) == dir_name:
+                    self.active_patient_tree_widget_item = self.tree_widget_data.topLevelItem(i)
+                    break
+        self.setPatientTreeItemColor(self.active_patient_tree_widget_item, COLOR_SELECTED)
+
+    def openDICOMDirDialog(self): 
+        # set path for dcm file
+        source_dir = QFileDialog.getExistingDirectory(self, "Set source Directory for DICOM files")
+        
+        # userinput for target filename if dcm path set 
+        if source_dir:
+            dir_name, ok = QInputDialog.getText(self, "Set patient Directory", "Enter name of Directory for patient data starting with 'patient':")
+            # check if directory exists, if yes -> open new dialog and check again 
+            if dir_name and ok:
+                while os.path.exists(os.path.join(self.working_dir, dir_name)) or os.path.exists(os.path.join(self.working_dir,("patient_" + dir_name))):
+                    dir_name, ok = QInputDialog.getText(self, "Set patient Directory", "Directory/Patient allready exists! Please choose another name starting with 'patient':")
+                    # break if dialog canceled by user 
+                    if not ok: 
+                        break
+
+                if dir_name and ok: 
+                    # check if name correct so that data can be found later 
+                    if not dir_name.startswith('patient'):
+                        dir_name = "patient_" + dir_name
+                        print("Name for directory does not start with 'patient'! New name:", dir_name)
+                    # create directory 
+                    path = os.path.join(self.working_dir, dir_name) 
+                    os.mkdir(path)
+                    os.mkdir(os.path.join(path, "models"))
+                    self.loadNewDICOM(source_dir, dir_name)
+                
     def setWorkingDir(self, dir):
         if len(dir) <= 0:
             return
@@ -195,7 +282,7 @@ class CarotidAnalyzer(QMainWindow, Ui_MainWindow):
                 item.child(i).setBackground(j, c)
 
 
-    def loadSelectedPatient(self):
+    def loadSelectedPatient(self):  
         if self.unsaved_changes:
             return
 
