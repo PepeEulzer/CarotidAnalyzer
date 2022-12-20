@@ -88,22 +88,30 @@ class CarotidAnalyzer(QMainWindow, Ui_MainWindow):
         if dir != None:
             self.setWorkingDir(dir)
  
+
     def loadNewDICOM(self, source_dir, dir_name):
         data = []
+        locations = []
         path = os.listdir(source_dir)
 
         # read in each dcm and save pixel data
         for file in path:
             ds = pydicom.dcmread(os.path.join(source_dir, file))
-            data.append(ds.pixel_array)
+            hu = pydicom.pixel_data_handlers.util.apply_modality_lut(ds.pixel_array, ds)
+            locations.append(ds[0x0020, 0x1041].value) # slice location
+            data.append(hu)
+        
+        # sort slices if required
+        if not (all(locations[i] <= locations[i + 1] for i in range(len(locations)-1))):
+            data = [x for _, x in sorted(zip(locations, data))] 
         data_array = np.transpose(np.array(data))
 
         # get meatdata for header/vtkImage
         dicomdata = pydicom.dcmread(os.path.join(source_dir, path[0]))
         dim_x, dim_y, dim_z = data_array.shape
-        s_z = float(dicomdata[0x0018,0x0088].value)  # spacing between slices 
-        s_x_y = dicomdata[0x0028,0x0030].value  # pixel spacing 
-        pos = dicomdata[0x0020,0x0032].value  # image position
+        s_z = float(dicomdata[0x0018, 0x0088].value)  # spacing between slices 
+        s_x_y = dicomdata[0x0028, 0x0030].value  # pixel spacing 
+        pos = dicomdata[0x0020, 0x0032].value  # image position
 
         # user input if dicom data should be saved in nrrd
         save_nrrd = QMessageBox.question(self, 'Save Full Volume', "Should the full volume be saved in a .nrrd file?", QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
@@ -123,7 +131,13 @@ class CarotidAnalyzer(QMainWindow, Ui_MainWindow):
             header['space origin'] = pos
             nrrd.write(nrrd_path, data_array, header)
         
-        # save pixel data as vtkimage
+        # directly load vtkImage -> works only for uncompressed files
+        # reader = vtk.vtkDICOMImageReader()
+        # reader.SetDirectoryName(source_dir)
+        # reader.Update()
+        # image = reader.GetOutput()
+
+        # convert to vtkImage
         image = vtk.vtkImageData()
         image.SetDimensions(dim_x,dim_y,dim_z)
         image.SetSpacing(s_x_y[0], s_x_y[1], s_z)
@@ -148,6 +162,7 @@ class CarotidAnalyzer(QMainWindow, Ui_MainWindow):
                     self.active_patient_tree_widget_item = self.tree_widget_data.topLevelItem(i)
                     break
         self.setPatientTreeItemColor(self.active_patient_tree_widget_item, COLOR_SELECTED)
+
 
     def openDICOMDirDialog(self): 
         # set path for dcm file
@@ -174,6 +189,7 @@ class CarotidAnalyzer(QMainWindow, Ui_MainWindow):
                     os.mkdir(path)
                     os.mkdir(os.path.join(path, "models"))
                     self.loadNewDICOM(source_dir, dir_name)
+                
                 
     def setWorkingDir(self, dir):
         if len(dir) <= 0:

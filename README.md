@@ -6,10 +6,13 @@ A full pipeline for cropping, segmentation, centerline computation, and interact
 
 Main dependencies
 - Python 3.10
-- pytorch 1.13
 - numpy 1.23
-- pyqt 5.15
-- vtk 9.1
+- pyqt 5.15 (GUI)
+- pyqtgraph 0.13 (graphs)
+- vtk 9.1 (rendering)
+- vmtk 1.5 (centerline computation)
+- pytorch 1.13 with monai and scikit-image (segmentation prediction)
+- pydicom 2.3 with gdcm (for compressed DICOM I/O)
 
 Install using Anaconda, with CUDA-enabled GPU:
 ```
@@ -24,8 +27,9 @@ conda create -n CarotidAnalyzer pytorch torchvision torchaudio pytorch-cuda=11.7
 Then install other packages:
 ```
 conda activate CarotidAnalyzer
-conda install -c conda-forge monai pyqt vtk vmtk pynrrd pyqtgraph
-conda install -c anaconda scikit-image
+conda install -c conda-forge monai pyqt pyqtgraph vtk vmtk pydicom pynrrd
+conda install scikit-image
+pip install python-gdcm
 ```
 
 The main application can now be used and edited. Extension modules can also be developed and integrated. The following sections are only relevant if the core GUI (not the GUI of extension modules) needs to be changed.
