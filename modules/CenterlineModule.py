@@ -156,7 +156,11 @@ class CenterlineModuleTab(QWidget):
                 self.TargetIds.pop(i)
                 self.centerline_view.GetRenderWindow().Render()
                 return
-        position = self.picker.GetPickPosition()
+        self.addCenterlineEndPoint(self.picker.GetPickPosition(), self.pick_source)
+        self.centerline_view.GetRenderWindow().Render()
+
+
+    def addCenterlineEndPoint(self, position, source=True):
         pointId = self.reader_lumen.GetOutput().FindPoint(position)
         position = self.reader_lumen.GetOutput().GetPoint(pointId)
         
@@ -169,7 +173,7 @@ class CenterlineModuleTab(QWidget):
         sphere_mapper = vtk.vtkPolyDataMapper()
         sphere_mapper.SetInputConnection(sphere.GetOutputPort())
 
-        if self.pick_source:
+        if source:
             self.SourceId = pointId
             self.actor_source.SetMapper(sphere_mapper)
             self.actor_source.GetProperty().SetColor(0.2, 1, 0.2)
@@ -181,7 +185,26 @@ class CenterlineModuleTab(QWidget):
             actor_target.GetProperty().SetColor(1, 0.2, 0.2)
             self.renderer.AddActor(actor_target)
             self.actors_targets.append(actor_target)
-        self.centerline_view.GetRenderWindow().Render()
+
+
+    def getSeedsFromCenterlines(self):
+        if self.centerlines is None:
+            return
+        
+        first_point = None
+        last_points = []
+        l = self.centerlines.GetLines()
+        l.InitTraversal()
+        for i in range(l.GetNumberOfCells()):
+            pointIds = vtk.vtkIdList()
+            l.GetNextCell(pointIds)
+            if pointIds.GetNumberOfIds() == 0: continue
+            first_point = self.centerlines.GetPoint(pointIds.GetId(0))
+            last_points.append(self.centerlines.GetPoint(pointIds.GetId(pointIds.GetNumberOfIds()-1)))
+        if first_point is not None:
+            self.addCenterlineEndPoint(first_point, source=True)
+        for p in last_points:
+            self.addCenterlineEndPoint(p, source=False)
         
 
     def computeCenterlines(self):
@@ -211,7 +234,10 @@ class CenterlineModuleTab(QWidget):
         centerlineFilter.SetRadiusArrayName('MaximumInscribedSphereRadius')
         centerlineFilter.SetFlipNormals(False)
         centerlineFilter.SetAppendEndPointsToCenterlines(False)
-        centerlineFilter.SetStopFastMarchingOnReachingTarget(False) # could be enabled for 1 target
+        if len(self.TargetIds) == 1:
+            centerlineFilter.SetStopFastMarchingOnReachingTarget(True)
+        else:
+            centerlineFilter.SetStopFastMarchingOnReachingTarget(False)
         centerlineFilter.SetSimplifyVoronoi(False)
         if self.DelaunayTessellation != None:
             centerlineFilter.GenerateDelaunayTessellationOff()
@@ -276,9 +302,11 @@ class CenterlineModuleTab(QWidget):
             if centerline_file:
                 self.reader_centerline.SetFileName("")
                 self.reader_centerline.SetFileName(centerline_file)
+                self.reader_centerline.Update()
                 self.mapper_centerline.SetInputConnection(self.reader_centerline.GetOutputPort())
                 self.renderer.AddActor(self.actor_centerline)
                 self.centerlines = self.reader_centerline.GetOutput()
+                self.getSeedsFromCenterlines()
             else:
                 self.renderer.RemoveActor(self.actor_centerline)
                 self.centerlines = None
