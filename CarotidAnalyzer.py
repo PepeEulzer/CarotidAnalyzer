@@ -131,7 +131,7 @@ class CarotidAnalyzer(QMainWindow, Ui_MainWindow):
             header['space origin'] = pos
             nrrd.write(nrrd_path, data_array, header)
         
-        # directly load vtkImage -> works only for uncompressed files
+        # directly load vtkImage -> works only for uncompressed files (but faster?)
         # reader = vtk.vtkDICOMImageReader()
         # reader.SetDirectoryName(source_dir)
         # reader.Update()
@@ -228,9 +228,7 @@ class CarotidAnalyzer(QMainWindow, Ui_MainWindow):
             add_if_exists("volume_left", "_left.nrrd")
             add_if_exists("volume_right", "_right.nrrd")
             add_if_exists("seg_left", "_left.seg.nrrd")
-            add_if_exists("seg_left_pred", "_left_pred.seg.nrrd")
             add_if_exists("seg_right", "_right.seg.nrrd")
-            add_if_exists("seg_right_pred", "_right_pred.seg.nrrd")
             add_if_exists("lumen_model_left", "_left_lumen.stl", True)
             add_if_exists("lumen_model_right", "_right_lumen.stl", True)
             add_if_exists("plaque_model_left", "_left_plaque.stl", True)
@@ -466,8 +464,7 @@ class CarotidAnalyzer(QMainWindow, Ui_MainWindow):
         self.segmentation_module.patient_dict = self.active_patient_dict
         self.segmentation_module.segmentation_module_left.loadVolumeSeg(
             self.active_patient_dict['volume_left'],
-            self.active_patient_dict['seg_left'],
-            self.active_patient_dict['seg_left_pred']
+            self.active_patient_dict['seg_left']
         )
 
 
@@ -485,8 +482,7 @@ class CarotidAnalyzer(QMainWindow, Ui_MainWindow):
         self.segmentation_module.patient_dict = self.active_patient_dict
         self.segmentation_module.segmentation_module_right.loadVolumeSeg(
             self.active_patient_dict['volume_right'],
-            self.active_patient_dict['seg_right'],
-            self.active_patient_dict['seg_right_pred']
+            self.active_patient_dict['seg_right']
         )
 
 

@@ -31,7 +31,6 @@ class SegmentationModuleTab(QWidget):
         self.label_map_data = None       # numpy array of raw label map scalar data
         self.threshold_img = None        # image to display threshold 
         self.volume_file = False         # path to CTA volume file
-        self.pred_file = False           # path to CNN segmentation prediction file
         self.plaque_pending = True       # True if no plaque pixels exist yet
         self.lumen_pending = True        # True if no lumen pixels exist yet
         self.model_camera_pending = True # True if camera of model_view has not been set yet
@@ -282,8 +281,7 @@ class SegmentationModuleTab(QWidget):
         super(SegmentationModuleTab, self).hideEvent(event)  
     
 
-    def loadVolumeSeg(self, volume_file, seg_file, pred_file, is_new_file=True):
-        self.pred_file = pred_file
+    def loadVolumeSeg(self, volume_file, seg_file, is_new_file=True):
         if volume_file:
             # load image volume if it is new
             if is_new_file:
@@ -844,9 +842,9 @@ class SegmentationModule(QTabWidget):
     def loadPatient(self, patient_dict):
         self.patient_dict = patient_dict
         self.segmentation_module_right.loadVolumeSeg(
-            patient_dict['volume_right'], patient_dict['seg_right'], patient_dict['seg_right_pred'])
+            patient_dict['volume_right'], patient_dict['seg_right'])
         self.segmentation_module_left.loadVolumeSeg(
-            patient_dict['volume_left'], patient_dict['seg_left'], patient_dict['seg_left_pred'])
+            patient_dict['volume_left'], patient_dict['seg_left'])
 
 
     def dataModifiedRight(self):
@@ -859,9 +857,9 @@ class SegmentationModule(QTabWidget):
 
     def discard(self):
         self.segmentation_module_right.loadVolumeSeg(
-            self.patient_dict['volume_right'], self.patient_dict['seg_right'], self.patient_dict['seg_right_pred'], False)
+            self.patient_dict['volume_right'], self.patient_dict['seg_right'], False)
         self.segmentation_module_left.loadVolumeSeg(
-            self.patient_dict['volume_left'], self.patient_dict['seg_left'], self.patient_dict['seg_left_pred'], False)
+            self.patient_dict['volume_left'], self.patient_dict['seg_left'], False)
         self.setTabText(0, "Right")
         self.setTabText(1, "Left")
 

@@ -1,5 +1,6 @@
 import os
 from collections import OrderedDict
+import time
 
 import numpy as np
 import nrrd
@@ -310,14 +311,10 @@ class CropModule(QWidget):
                 self.resetViews()
                 return
 
-            img_data, header = nrrd.read(patient_dict['volume_raw'])
-            self.image = vtk.vtkImageData()
-            self.image.SetDimensions(header['sizes'])
-            sx, sy, sz = np.diagonal(header['space directions'])
-            self.image.SetSpacing(sx, sy, sz)
-            self.image.SetOrigin(header['space origin'])
-            vtk_data_array = numpy_to_vtk(img_data.ravel(order='F'))
-            self.image.GetPointData().SetScalars(vtk_data_array)
+            reader = vtk.vtkNrrdReader()
+            reader.SetFileName(patient_dict['volume_raw'])
+            reader.Update()
+            self.image = reader.GetOutput()
 
         # compute crop volume size around a center
         # needs to be 1/4 of target dimension (120 144 248)
