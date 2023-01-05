@@ -296,13 +296,12 @@ class CropModule(QWidget):
         self.volume_view.reset()
 
 
-    def loadPatient(self, patient_dict,image=None):
+    def loadPatient(self, patient_dict, image=None):
         self.patient_dict = patient_dict
 
         # load patient if data from dicom
         if image:  
             self.image = image
-            sx, sy, sz = self.image.GetSpacing()
            
         # load patient if data from nrrd   
         else: 
@@ -318,6 +317,7 @@ class CropModule(QWidget):
 
         # compute crop volume size around a center
         # needs to be 1/4 of target dimension (120 144 248)
+        sx, sy, sz = self.image.GetSpacing()
         self.crop_volume_size = (30*sx, 36*sy, 62*sz)
 
         # set the volume image in both views
@@ -337,6 +337,7 @@ class CropModule(QWidget):
         self.__loadCropVolumeBox(self.patient_dict['volume_right'], self.box_right_source, self.box_right_actor, self.cut_right_actor)
 
         self.slice_view_slider.setSliderPosition(self.slice_view.slice)
+        
         # enable edit options
         self.button_set_left.setEnabled(True)
         self.button_set_right.setEnabled(True)

@@ -104,9 +104,9 @@ class CarotidAnalyzer(QMainWindow, Ui_MainWindow):
         # sort slices if required
         if not (all(locations[i] <= locations[i + 1] for i in range(len(locations)-1))):
             data = [x for _, x in sorted(zip(locations, data))] 
-        data_array = np.transpose(np.array(data))
+        data_array = np.transpose(np.array(data, dtype=np.int16))
 
-        # get meatdata for header/vtkImage
+        # get metadata for header/vtkImage
         dicomdata = pydicom.dcmread(os.path.join(source_dir, path[0]))
         dim_x, dim_y, dim_z = data_array.shape
         s_z = float(dicomdata[0x0018, 0x0088].value)  # spacing between slices 
@@ -120,10 +120,9 @@ class CarotidAnalyzer(QMainWindow, Ui_MainWindow):
             filename = dir_name + ".nrrd"
             nrrd_path = os.path.join(self.working_dir, dir_name, filename)
             header = OrderedDict()
-            header['type'] = 'int16'
             header['dimension'] = 3
             header['space'] = 'left-posterior-superior'
-            header['sizes'] =  str(dim_x) + str(dim_y) + str(dim_z) 
+            header['sizes'] =  str(dim_x) + ' ' + str(dim_y) + ' ' + str(dim_z) 
             header['space directions'] = [[s_x_y[0], 0.0, 0.0], [0.0, s_x_y[1], 0.0], [0.0, 0.0,s_z]]
             header['kinds'] = ['domain', 'domain', 'domain']
             header['endian'] = 'little'
@@ -451,7 +450,6 @@ class CarotidAnalyzer(QMainWindow, Ui_MainWindow):
 
     
     def newLeftVolume(self):
-        print("New left volume!")
         patient_ID = self.active_patient_dict['patient_ID']
         base_path  = self.active_patient_dict['base_path']
         path_left = os.path.join(base_path, patient_ID + "_left.nrrd")
@@ -469,7 +467,6 @@ class CarotidAnalyzer(QMainWindow, Ui_MainWindow):
 
 
     def newRightVolume(self):
-        print("New right volume!")
         patient_ID = self.active_patient_dict['patient_ID']
         base_path  = self.active_patient_dict['base_path']
         path_right = os.path.join(base_path, patient_ID + "_right.nrrd")
