@@ -8,7 +8,7 @@ import nrrd
 import pydicom
 import vtk
 from vtk.util.numpy_support import numpy_to_vtk
-from PyQt5.QtCore import QSettings, QVariant
+from PyQt5.QtCore import QSettings, QVariant, QObject, QThread, pyqtSignal
 from PyQt5.QtWidgets import (
     QApplication, QFileDialog, QMainWindow, QMessageBox, 
     QTreeWidgetItem, QInputDialog
@@ -128,14 +128,8 @@ class CarotidAnalyzer(QMainWindow, Ui_MainWindow):
             header['endian'] = 'little'
             header['encoding'] = 'gzip'
             header['space origin'] = pos
-            nrrd.write(nrrd_path, data_array, header)
-        
-        # directly load vtkImage -> works only for uncompressed files (but faster?)
-        # reader = vtk.vtkDICOMImageReader()
-        # reader.SetDirectoryName(source_dir)
-        # reader.Update()
-        # image = reader.GetOutput()
-
+            self.write_nrrd(nrrd_path,data_array,header)
+           
         # convert to vtkImage
         image = vtk.vtkImageData()
         image.SetDimensions(dim_x,dim_y,dim_z)
@@ -161,7 +155,21 @@ class CarotidAnalyzer(QMainWindow, Ui_MainWindow):
                     self.active_patient_tree_widget_item = self.tree_widget_data.topLevelItem(i)
                     break
         self.setPatientTreeItemColor(self.active_patient_tree_widget_item, COLOR_SELECTED)
-
+    
+    def write_nrrd(self,path,array,header):
+        self.button_load_file.setEnabled(False)
+        self.thread = QThread()
+        self.worker = Worker()
+        self.worker.moveToThread(self.thread)
+        self.worker.path = path 
+        self.worker.array = array
+        self.worker.header = header
+        self.thread.started.connect(self.worker.run) 
+        self.worker.finished.connect(self.thread.quit)
+        self.worker.finished.connect(self.worker.deleteLater)
+        self.thread.finished.connect(self.thread.deleteLater)
+        self.thread.start()
+        self.thread.finished.connect(lambda: self.button_load_file.setEnabled(True))
 
     def openDICOMDirDialog(self): 
         # set path for dcm file
@@ -590,6 +598,19 @@ class CarotidAnalyzer(QMainWindow, Ui_MainWindow):
             super(CarotidAnalyzer, self).closeEvent(event)
         else:
             event.ignore()
+
+class Worker(QObject):  
+    finished = pyqtSignal()
+    path = None
+    array = None 
+    header = None 
+   
+    def run(self): 
+        nrrd.write(self.path, self.array, self.header)
+        self.finished.emit()
+        
+
+
 
 
 if __name__ == "__main__":
