@@ -96,6 +96,7 @@ class CarotidAnalyzer(QMainWindow, Ui_MainWindow):
 
         # read in each dcm and save pixel data
         for file in path:
+            # TODO progress bar: "Reading " + file
             ds = pydicom.dcmread(os.path.join(source_dir, file))
             hu = pydicom.pixel_data_handlers.util.apply_modality_lut(ds.pixel_array, ds)
             locations.append(ds[0x0020, 0x1041].value) # slice location
@@ -123,12 +124,12 @@ class CarotidAnalyzer(QMainWindow, Ui_MainWindow):
             header['dimension'] = 3
             header['space'] = 'left-posterior-superior'
             header['sizes'] =  str(dim_x) + ' ' + str(dim_y) + ' ' + str(dim_z) 
-            header['space directions'] = [[s_x_y[0], 0.0, 0.0], [0.0, s_x_y[1], 0.0], [0.0, 0.0,s_z]]
+            header['space directions'] = [[s_x_y[0], 0.0, 0.0], [0.0, s_x_y[1], 0.0], [0.0, 0.0, s_z]]
             header['kinds'] = ['domain', 'domain', 'domain']
             header['endian'] = 'little'
             header['encoding'] = 'gzip'
             header['space origin'] = pos
-            self.write_nrrd(nrrd_path,data_array,header)
+            self.write_nrrd(nrrd_path, data_array, header)
            
         # convert to vtkImage
         image = vtk.vtkImageData()
@@ -156,10 +157,10 @@ class CarotidAnalyzer(QMainWindow, Ui_MainWindow):
                     break
         self.setPatientTreeItemColor(self.active_patient_tree_widget_item, COLOR_SELECTED)
     
-    def write_nrrd(self,path,array,header):
+    def write_nrrd(self, path, array, header):
         self.button_load_file.setEnabled(False)
         self.thread = QThread()
-        self.worker = Worker()
+        self.worker = NrrdWriterWorker()
         self.worker.moveToThread(self.thread)
         self.worker.path = path 
         self.worker.array = array
@@ -599,7 +600,9 @@ class CarotidAnalyzer(QMainWindow, Ui_MainWindow):
         else:
             event.ignore()
 
-class Worker(QObject):  
+
+
+class NrrdWriterWorker(QObject):  
     finished = pyqtSignal()
     path = None
     array = None 
@@ -609,8 +612,6 @@ class Worker(QObject):
         nrrd.write(self.path, self.array, self.header)
         self.finished.emit()
         
-
-
 
 
 if __name__ == "__main__":
