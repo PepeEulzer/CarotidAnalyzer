@@ -129,7 +129,7 @@ class CarotidAnalyzer(QMainWindow, Ui_MainWindow):
             header['endian'] = 'little'
             header['encoding'] = 'gzip'
             header['space origin'] = pos
-            self.write_nrrd(nrrd_path, data_array, header)
+            self.write_nrrd(nrrd_path, data_array, header, filename)
            
         # convert to vtkImage
         image = vtk.vtkImageData()
@@ -157,8 +157,9 @@ class CarotidAnalyzer(QMainWindow, Ui_MainWindow):
                     break
         self.setPatientTreeItemColor(self.active_patient_tree_widget_item, COLOR_SELECTED)
     
-    def write_nrrd(self, path, array, header):
+    def write_nrrd(self, path, array, header, filename):
         self.button_load_file.setEnabled(False)
+        self.statusbar.showMessage("Saving "+filename+" ...")
         self.thread = QThread()
         self.worker = NrrdWriterWorker()
         self.worker.moveToThread(self.thread)
@@ -171,6 +172,7 @@ class CarotidAnalyzer(QMainWindow, Ui_MainWindow):
         self.thread.finished.connect(self.thread.deleteLater)
         self.thread.start()
         self.thread.finished.connect(lambda: self.button_load_file.setEnabled(True))
+        self.thread.finished.connect(lambda: self.statusbar.clearMessage())
 
     def openDICOMDirDialog(self): 
         # set path for dcm file
