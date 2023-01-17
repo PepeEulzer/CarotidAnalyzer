@@ -1,5 +1,6 @@
 import os
 import sys
+import shutil
 import glob
 from collections import OrderedDict
 
@@ -57,6 +58,7 @@ class CarotidAnalyzer(QMainWindow, Ui_MainWindow):
         # connect signals to slots
         self.action_load_new_DICOM.triggered.connect(self.openDICOMDirDialog)
         self.action_set_working_directory.triggered.connect(self.openWorkingDirDialog)
+        self.action_delete_selected_patient.triggered.connect(self.deleteSelectedPatient)
         self.action_data_inspector.triggered[bool].connect(self.viewDataInspector)
         self.action_crop_module.triggered[bool].connect(self.viewCropModule)
         self.action_segmentation_module.triggered[bool].connect(self.viewSegmentationModule)
@@ -115,7 +117,7 @@ class CarotidAnalyzer(QMainWindow, Ui_MainWindow):
         pos = dicomdata[0x0020, 0x0032].value  # image position
 
         # user input if dicom data should be saved in nrrd
-        save_nrrd = QMessageBox.question(self, 'Save Full Volume', "Should the full volume be saved in a .nrrd file?", QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
+        save_nrrd = QMessageBox.question(self, "Save Full Volume", "Should the full volume be saved in a .nrrd file?", QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
         if save_nrrd == QMessageBox.Yes:
             # save as nrrd 
             filename = dir_name + ".nrrd"
@@ -305,6 +307,24 @@ class CarotidAnalyzer(QMainWindow, Ui_MainWindow):
             for j in range(3):
                 item.child(i).setBackground(j, c)
 
+    
+    def deleteSelectedPatient(self):
+        # get selected top parent item
+        selected = self.tree_widget_data.currentItem()
+        if selected == None:
+            return
+        elif selected.parent() != None: 
+            selected = selected.parent()
+
+         # delete patient dierectory and remove patient from tree widget if user confirms patient 
+        patient = selected.text(0)
+        delete = QMessageBox.question(self, "Delete patient", "Do you want to delete the data of " + patient, QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
+        if delete == QMessageBox.Yes:
+            patient_idx = self.tree_widget_data.indexOfTopLevelItem(selected)  
+            shutil.rmtree(os.path.join(self.working_dir, patient))
+            del self.patient_data[patient_idx]  
+            self.tree_widget_data.takeTopLevelItem(patient_idx)
+       
 
     def loadSelectedPatient(self):  
         if self.unsaved_changes:
