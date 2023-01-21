@@ -9,10 +9,10 @@ import nrrd
 import pydicom
 import vtk
 from vtk.util.numpy_support import numpy_to_vtk
-from PyQt5.QtCore import QSettings, QVariant, QObject, QThread, pyqtSignal
+from PyQt5.QtCore import QSettings, QVariant, QObject, QThread, QMutex, pyqtSignal
 from PyQt5.QtWidgets import (
     QApplication, QFileDialog, QMainWindow, QMessageBox, 
-    QTreeWidgetItem, QInputDialog
+    QTreeWidgetItem, QInputDialog, QProgressBar
 )
 from PyQt5.QtGui import QColor
 
@@ -36,6 +36,8 @@ class CarotidAnalyzer(QMainWindow, Ui_MainWindow):
         self.patient_data = []
         self.active_patient_dict = {}
         self.active_patient_tree_widget_item = None
+        self.data = []
+        self.locations = []
 
         # instantiate modules
         self.crop_module = CropModule(self)
@@ -90,24 +92,14 @@ class CarotidAnalyzer(QMainWindow, Ui_MainWindow):
         if dir != None:
             self.setWorkingDir(dir)
  
-
-    def loadNewDICOM(self, source_dir, dir_name):
-        data = []
-        locations = []
+    
+    def loadNewDICOM(self, source_dir, dir_name): 
         path = os.listdir(source_dir)
 
-        # read in each dcm and save pixel data
-        for file in path:
-            # TODO progress bar: "Reading " + file
-            ds = pydicom.dcmread(os.path.join(source_dir, file))
-            hu = pydicom.pixel_data_handlers.util.apply_modality_lut(ds.pixel_array, ds)
-            locations.append(ds[0x0020, 0x1041].value) # slice location
-            data.append(hu)
-        
         # sort slices if required
-        if not (all(locations[i] <= locations[i + 1] for i in range(len(locations)-1))):
-            data = [x for _, x in sorted(zip(locations, data))] 
-        data_array = np.transpose(np.array(data, dtype=np.int16))
+        if not (all(self.locations[i] <= self.locations[i + 1] for i in range(len(self.locations)-1))):
+            self.data = [x for _, x in sorted(zip(self.locations, self.data))] 
+        data_array = np.transpose(np.array(self.data, dtype=np.int16))
 
         # get metadata for header/vtkImage
         dicomdata = pydicom.dcmread(os.path.join(source_dir, path[0]))
@@ -158,10 +150,12 @@ class CarotidAnalyzer(QMainWindow, Ui_MainWindow):
                     self.active_patient_tree_widget_item = self.tree_widget_data.topLevelItem(i)
                     break
         self.setPatientTreeItemColor(self.active_patient_tree_widget_item, COLOR_SELECTED)
-    
+
+
     def write_nrrd(self, path, array, header, filename):
         self.button_load_file.setEnabled(False)
         self.statusbar.showMessage("Saving "+filename+" ...")
+
         self.thread = QThread()
         self.worker = NrrdWriterWorker()
         self.worker.moveToThread(self.thread)
@@ -175,6 +169,39 @@ class CarotidAnalyzer(QMainWindow, Ui_MainWindow):
         self.thread.start()
         self.thread.finished.connect(lambda: self.button_load_file.setEnabled(True))
         self.thread.finished.connect(lambda: self.statusbar.clearMessage())
+
+
+    def read_DICOM(self,source_dir, dir_name):  
+        self.pbar = QProgressBar() 
+        self.pbar.setMinimum(0)
+        self.pbar.setMaximum(len(os.listdir(source_dir)))
+        self.pbar.setFormat("Reading "+os.path.basename(source_dir)+" ...")
+        self.statusbar.addWidget(self.pbar)
+
+        self.thread = QThread()
+        self.worker = DICOMReaderWorker()
+        self.worker.moveToThread(self.thread)
+        self.worker.source_dir = source_dir
+        self.thread.started.connect(self.worker.run) 
+        self.worker.data_processed.connect(self.data_ready)  
+        self.worker.finished.connect(self.thread.quit)
+        self.worker.finished.connect(self.worker.deleteLater)
+        self.thread.finished.connect(self.thread.deleteLater)
+        self.worker.progress.connect(self.report_DICOM_Progress)  
+        self.thread.start()
+        self.thread.finished.connect(lambda:self.statusbar.removeWidget(self.pbar))  # show progress in a progress bar 
+        self.thread.finished.connect(lambda:self.loadNewDICOM(source_dir,dir_name))  # proceed with dicom data when thread finished 
+       
+    
+    def report_DICOM_Progress(self,progress):
+        # update progress bar 
+        self.pbar.setValue(progress) 
+        
+    def data_ready(self,data):
+        # save data from thread to reuse 
+        self.data = data[0]
+        self.locations = data[1]
+
 
     def openDICOMDirDialog(self): 
         # set path for dcm file
@@ -200,7 +227,8 @@ class CarotidAnalyzer(QMainWindow, Ui_MainWindow):
                     path = os.path.join(self.working_dir, dir_name) 
                     os.mkdir(path)
                     os.mkdir(os.path.join(path, "models"))
-                    self.loadNewDICOM(source_dir, dir_name)
+                    self.read_DICOM(source_dir,dir_name)  # start new thread to read dicom and report progress 
+
                 
                 
     def setWorkingDir(self, dir):
@@ -306,24 +334,6 @@ class CarotidAnalyzer(QMainWindow, Ui_MainWindow):
         for i in range(item.childCount()):
             for j in range(3):
                 item.child(i).setBackground(j, c)
-
-    
-    def deleteSelectedPatient(self):
-        # get selected top parent item
-        selected = self.tree_widget_data.currentItem()
-        if selected == None:
-            return
-        elif selected.parent() != None: 
-            selected = selected.parent()
-
-         # delete patient dierectory and remove patient from tree widget if user confirms patient 
-        patient = selected.text(0)
-        delete = QMessageBox.question(self, "Delete patient", "Do you want to delete the data of " + patient, QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
-        if delete == QMessageBox.Yes:
-            patient_idx = self.tree_widget_data.indexOfTopLevelItem(selected)  
-            shutil.rmtree(os.path.join(self.working_dir, patient))
-            del self.patient_data[patient_idx]  
-            self.tree_widget_data.takeTopLevelItem(patient_idx)
        
 
     def loadSelectedPatient(self):  
@@ -356,6 +366,24 @@ class CarotidAnalyzer(QMainWindow, Ui_MainWindow):
                 if SHOW_MODEL_MISMATCH_WARNING:
                     self.__checkSegMatchesModels()
                 break
+
+
+    def deleteSelectedPatient(self):
+        # get selected top parent item
+        selected = self.tree_widget_data.currentItem()
+        if selected == None:
+            return
+        elif selected.parent() != None: 
+            selected = selected.parent()
+
+         # delete patient dierectory and remove patient from tree widget if user confirms patient 
+        patient = selected.text(0)
+        delete = QMessageBox.question(self, "Delete patient", "Do you want to delete the data of " + patient, QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
+        if delete == QMessageBox.Yes:
+            patient_idx = self.tree_widget_data.indexOfTopLevelItem(selected)  
+            shutil.rmtree(os.path.join(self.working_dir, patient))
+            del self.patient_data[patient_idx]  
+            self.tree_widget_data.takeTopLevelItem(patient_idx)
 
 
     def __checkSegMatchesModels(self):
@@ -622,6 +650,30 @@ class CarotidAnalyzer(QMainWindow, Ui_MainWindow):
         else:
             event.ignore()
 
+
+class DICOMReaderWorker(QObject):  
+    finished = pyqtSignal()
+    progress = pyqtSignal(int)
+    data_processed = pyqtSignal(object)
+    source_dir = None 
+   
+
+    def run(self):
+        self.data = []
+        self.locations = []
+        i = 0
+        path = os.listdir(self.source_dir)
+        for file in path:
+            #read in each dcm and save pixel data, emit progress and data when finished 
+            ds = pydicom.dcmread(os.path.join(self.source_dir, file))
+            hu = pydicom.pixel_data_handlers.util.apply_modality_lut(ds.pixel_array, ds)
+            self.locations.append(ds[0x0020, 0x1041].value) # slice location
+            self.data.append(hu)
+            self.progress.emit(i)
+            i += 1
+
+        self.data_processed.emit((self.data,self.locations))
+        self.finished.emit()
 
 
 class NrrdWriterWorker(QObject):  
