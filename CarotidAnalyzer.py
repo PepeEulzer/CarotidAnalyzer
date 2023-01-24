@@ -9,7 +9,7 @@ import nrrd
 import pydicom
 import vtk
 from vtk.util.numpy_support import numpy_to_vtk
-from PyQt5.QtCore import QSettings, QVariant, QObject, QThread, QMutex, pyqtSignal
+from PyQt5.QtCore import QSettings, QVariant, QObject, QThread, pyqtSignal
 from PyQt5.QtWidgets import (
     QApplication, QFileDialog, QMainWindow, QMessageBox, 
     QTreeWidgetItem, QInputDialog, QProgressBar
@@ -38,6 +38,8 @@ class CarotidAnalyzer(QMainWindow, Ui_MainWindow):
         self.active_patient_tree_widget_item = None
         self.data = []
         self.locations = []
+        self.DICOM_source_dir = ""
+        self.DICOM_patient_ID = ""
 
         # instantiate modules
         self.crop_module = CropModule(self)
@@ -93,16 +95,9 @@ class CarotidAnalyzer(QMainWindow, Ui_MainWindow):
             self.setWorkingDir(dir)
  
     
-    def loadNewDICOM(self, source_dir, dir_name): 
-        path = os.listdir(source_dir)
-
-        # sort slices if required
-        if not (all(self.locations[i] <= self.locations[i + 1] for i in range(len(self.locations)-1))):
-            self.data = [x for _, x in sorted(zip(self.locations, self.data))] 
-        data_array = np.transpose(np.array(self.data, dtype=np.int16))
-
+    def loadNewDICOM(self, data_array): 
         # get metadata for header/vtkImage
-        dicomdata = pydicom.dcmread(os.path.join(source_dir, path[0]))
+        dicomdata = pydicom.dcmread(os.path.join(self.DICOM_source_dir, os.listdir(self.DICOM_source_dir)[0]))
         dim_x, dim_y, dim_z = data_array.shape
         s_z = float(dicomdata[0x0018, 0x0088].value)  # spacing between slices 
         s_x_y = dicomdata[0x0028, 0x0030].value  # pixel spacing 
@@ -112,8 +107,8 @@ class CarotidAnalyzer(QMainWindow, Ui_MainWindow):
         save_nrrd = QMessageBox.question(self, "Save Full Volume", "Should the full volume be saved in a .nrrd file?", QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
         if save_nrrd == QMessageBox.Yes:
             # save as nrrd 
-            filename = dir_name + ".nrrd"
-            nrrd_path = os.path.join(self.working_dir, dir_name, filename)
+            filename = self.DICOM_patient_ID + ".nrrd"
+            nrrd_path = os.path.join(self.working_dir, self.DICOM_patient_ID, filename)
             header = OrderedDict()
             header['dimension'] = 3
             header['space'] = 'left-posterior-superior'
@@ -136,7 +131,7 @@ class CarotidAnalyzer(QMainWindow, Ui_MainWindow):
         # update tree widget, load patient
         self.setWorkingDir(self.working_dir)   
         for patient in self.patient_data:
-            if patient['patient_ID'] == dir_name:
+            if patient['patient_ID'] == self.DICOM_patient_ID:
                 self.active_patient_dict = patient
                 self.crop_module.loadPatient(patient, image)
                 self.segmentation_module.loadPatient(patient)
@@ -146,7 +141,7 @@ class CarotidAnalyzer(QMainWindow, Ui_MainWindow):
         
         # set as activated widget
         for i in range(self.tree_widget_data.topLevelItemCount()):
-                if self.tree_widget_data.topLevelItem(i).text(0) == dir_name:
+                if self.tree_widget_data.topLevelItem(i).text(0) == self.DICOM_patient_ID:
                     self.active_patient_tree_widget_item = self.tree_widget_data.topLevelItem(i)
                     break
         self.setPatientTreeItemColor(self.active_patient_tree_widget_item, COLOR_SELECTED)
@@ -170,65 +165,63 @@ class CarotidAnalyzer(QMainWindow, Ui_MainWindow):
         self.thread.finished.connect(lambda: self.button_load_file.setEnabled(True))
         self.thread.finished.connect(lambda: self.statusbar.clearMessage())
 
-
-    def read_DICOM(self,source_dir, dir_name):  
-        self.pbar = QProgressBar() 
-        self.pbar.setMinimum(0)
-        self.pbar.setMaximum(len(os.listdir(source_dir)))
-        self.pbar.setFormat("Reading "+os.path.basename(source_dir)+" ...")
-        self.statusbar.addWidget(self.pbar)
-
-        self.thread = QThread()
-        self.worker = DICOMReaderWorker()
-        self.worker.moveToThread(self.thread)
-        self.worker.source_dir = source_dir
-        self.thread.started.connect(self.worker.run) 
-        self.worker.data_processed.connect(self.data_ready)  
-        self.worker.finished.connect(self.thread.quit)
-        self.worker.finished.connect(self.worker.deleteLater)
-        self.thread.finished.connect(self.thread.deleteLater)
-        self.worker.progress.connect(self.report_DICOM_Progress)  
-        self.thread.start()
-        self.thread.finished.connect(lambda:self.statusbar.removeWidget(self.pbar))  # show progress in a progress bar 
-        self.thread.finished.connect(lambda:self.loadNewDICOM(source_dir,dir_name))  # proceed with dicom data when thread finished 
-       
     
-    def report_DICOM_Progress(self,progress):
-        # update progress bar 
-        self.pbar.setValue(progress) 
+    def report_DICOM_Progress(self, progress_val, progress_msg):
+        self.pbar.setValue(progress_val)
+        self.pbar.setFormat(progress_msg + " (%p%)")
         
-    def data_ready(self,data):
-        # save data from thread to reuse 
-        self.data = data[0]
-        self.locations = data[1]
-
 
     def openDICOMDirDialog(self): 
         # set path for dcm file
-        source_dir = QFileDialog.getExistingDirectory(self, "Set source Directory for DICOM files")
+        source_dir = QFileDialog.getExistingDirectory(self, "Set source directory of DICOM files")
         
         # userinput for target filename if dcm path set 
         if source_dir:
-            dir_name, ok = QInputDialog.getText(self, "Set patient Directory", "Enter name of Directory for patient data starting with 'patient':")
+            dir_name, ok = QInputDialog.getText(self, "Set Patient Directory", "Enter name of directory for patient data:")
             # check if directory exists, if yes -> open new dialog and check again 
             if dir_name and ok:
-                while os.path.exists(os.path.join(self.working_dir, dir_name)) or os.path.exists(os.path.join(self.working_dir,("patient_" + dir_name))):
-                    dir_name, ok = QInputDialog.getText(self, "Set patient Directory", "Directory/Patient allready exists! Please choose another name starting with 'patient':")
+                while (os.path.exists(os.path.join(self.working_dir, dir_name)) or
+                       os.path.exists(os.path.join(self.working_dir,("patient_" + dir_name)))):
+                    dir_name, ok = QInputDialog.getText(self, "Set patient Directory", "Directory/Patient allready exists! Please choose another name:")
                     # break if dialog canceled by user 
                     if not ok: 
                         break
 
                 if dir_name and ok: 
-                    # check if name correct so that data can be found later 
+                    # check if name correct so that data can be found later
                     if not dir_name.startswith('patient'):
                         dir_name = "patient_" + dir_name
-                        print("Name for directory does not start with 'patient'! New name:", dir_name)
+                    
                     # create directory 
                     path = os.path.join(self.working_dir, dir_name) 
                     os.mkdir(path)
                     os.mkdir(os.path.join(path, "models"))
-                    self.read_DICOM(source_dir,dir_name)  # start new thread to read dicom and report progress 
+                    self.DICOM_source_dir = source_dir
+                    self.DICOM_patient_ID = dir_name
+                    
+                    # start new thread to read dicom and report progress
+                    self.action_load_new_DICOM.setEnabled(False)
+                    self.pbar = QProgressBar() 
+                    self.pbar.setMinimum(0)
+                    self.pbar.setMaximum(len(os.listdir(source_dir)) + 1)
+                    # self.pbar.setFormat("Reading " + os.path.basename(source_dir) + " ...")
+                    self.statusbar.addWidget(self.pbar)
 
+                    self.thread = QThread()
+                    self.worker = DICOMReaderWorker()
+                    self.worker.source_dir = source_dir
+                    self.worker.moveToThread(self.thread)
+
+                    self.worker.progress[int, str].connect(self.report_DICOM_Progress)  
+                    self.worker.data_processed[object].connect(self.loadNewDICOM)
+                    self.worker.finished.connect(self.thread.quit)
+                    self.worker.finished.connect(self.worker.deleteLater)
+
+                    self.thread.started.connect(self.worker.run)
+                    self.thread.finished.connect(lambda: self.action_load_new_DICOM.setEnabled(True))
+                    self.thread.finished.connect(lambda: self.statusbar.removeWidget(self.pbar))
+                    self.thread.finished.connect(self.thread.deleteLater)
+                    self.thread.start()
                 
                 
     def setWorkingDir(self, dir):
@@ -359,10 +352,7 @@ class CarotidAnalyzer(QMainWindow, Ui_MainWindow):
             if (patient['patient_ID'] == patient_ID):
                 # update patient in all modules
                 self.active_patient_dict = patient
-                self.crop_module.loadPatient(patient)
-                self.segmentation_module.loadPatient(patient)
-                self.centerline_module.loadPatient(patient)
-                self.stenosis_classifier.loadPatient(patient)
+                self.__updatePatientInModules()
                 if SHOW_MODEL_MISMATCH_WARNING:
                     self.__checkSegMatchesModels()
                 break
@@ -373,18 +363,30 @@ class CarotidAnalyzer(QMainWindow, Ui_MainWindow):
         selected = self.tree_widget_data.currentItem()
         if selected == None:
             return
-        elif selected.parent() != None: 
+
+        while selected.parent() != None: 
             selected = selected.parent()
 
-         # delete patient dierectory and remove patient from tree widget if user confirms patient 
+        # delete patient dierectory and remove patient from tree widget if user confirms patient
         patient = selected.text(0)
-        delete = QMessageBox.question(self, "Delete patient", "Do you want to delete the data of " + patient, QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
+        delete = QMessageBox.question(self,
+                                      "Delete patient",
+                                      "Do you want to delete the data of " + patient + "?",
+                                      QMessageBox.Yes | QMessageBox.No,
+                                      QMessageBox.No)
         if delete == QMessageBox.Yes:
-            patient_idx = self.tree_widget_data.indexOfTopLevelItem(selected)  
+            patient_idx = self.tree_widget_data.indexOfTopLevelItem(selected)
             shutil.rmtree(os.path.join(self.working_dir, patient))
-            del self.patient_data[patient_idx]  
+            del self.patient_data[patient_idx]
             self.tree_widget_data.takeTopLevelItem(patient_idx)
 
+    
+    def __updatePatientInModules(self):
+        self.crop_module.loadPatient(self.active_patient_dict)
+        self.segmentation_module.loadPatient(self.active_patient_dict)
+        self.centerline_module.loadPatient(self.active_patient_dict)
+        self.stenosis_classifier.loadPatient(self.active_patient_dict)
+        
 
     def __checkSegMatchesModels(self):
         """
@@ -651,29 +653,35 @@ class CarotidAnalyzer(QMainWindow, Ui_MainWindow):
             event.ignore()
 
 
+
 class DICOMReaderWorker(QObject):  
     finished = pyqtSignal()
-    progress = pyqtSignal(int)
+    progress = pyqtSignal(int, str)
     data_processed = pyqtSignal(object)
     source_dir = None 
    
 
     def run(self):
-        self.data = []
-        self.locations = []
-        i = 0
+        data = []
+        locations = []
         path = os.listdir(self.source_dir)
-        for file in path:
+        for idx, file in enumerate(path):
             #read in each dcm and save pixel data, emit progress and data when finished 
+            self.progress.emit(idx, "Loading " + file)
             ds = pydicom.dcmread(os.path.join(self.source_dir, file))
             hu = pydicom.pixel_data_handlers.util.apply_modality_lut(ds.pixel_array, ds)
-            self.locations.append(ds[0x0020, 0x1041].value) # slice location
-            self.data.append(hu)
-            self.progress.emit(i)
-            i += 1
+            locations.append(ds[0x0020, 0x1041].value) # slice location
+            data.append(hu)
 
-        self.data_processed.emit((self.data,self.locations))
+        # sort slices if required
+        self.progress.emit(idx + 1, "Sorting slices...")
+        if not (all(locations[i] <= locations[i + 1] for i in range(len(locations)-1))):
+            data = [x for _, x in sorted(zip(locations, data))] 
+        data_array = np.transpose(np.array(data, dtype=np.int16))
+
+        self.data_processed.emit(data_array)
         self.finished.emit()
+
 
 
 class NrrdWriterWorker(QObject):  
