@@ -204,7 +204,6 @@ class CarotidAnalyzer(QMainWindow, Ui_MainWindow):
                     self.pbar = QProgressBar() 
                     self.pbar.setMinimum(0)
                     self.pbar.setMaximum(len(os.listdir(source_dir)) + 1)
-                    # self.pbar.setFormat("Reading " + os.path.basename(source_dir) + " ...")
                     self.statusbar.addWidget(self.pbar)
 
                     self.thread = QThread()
@@ -666,7 +665,7 @@ class DICOMReaderWorker(QObject):
         locations = []
         path = os.listdir(self.source_dir)
         for idx, file in enumerate(path):
-            #read in each dcm and save pixel data, emit progress and data when finished 
+            # read in each dcm and save pixel data, emit progress and data when finished 
             self.progress.emit(idx, "Loading " + file)
             ds = pydicom.dcmread(os.path.join(self.source_dir, file))
             hu = pydicom.pixel_data_handlers.util.apply_modality_lut(ds.pixel_array, ds)
