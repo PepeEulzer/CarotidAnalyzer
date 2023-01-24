@@ -366,7 +366,7 @@ class CarotidAnalyzer(QMainWindow, Ui_MainWindow):
         while selected.parent() != None: 
             selected = selected.parent()
 
-        # delete patient dierectory and remove patient from tree widget if user confirms patient
+        # delete patient dierectory, reset modules and remove patient from tree widget if user confirms patient
         patient = selected.text(0)
         delete = QMessageBox.question(self,
                                       "Delete patient",
@@ -377,7 +377,14 @@ class CarotidAnalyzer(QMainWindow, Ui_MainWindow):
             patient_idx = self.tree_widget_data.indexOfTopLevelItem(selected)
             shutil.rmtree(os.path.join(self.working_dir, patient))
             del self.patient_data[patient_idx]
+            if patient == self.active_patient_dict['patient_ID']:
+                self.active_patient_dict = dict.fromkeys(self.active_patient_dict,False)
+                self.__updatePatientInModules()
+                self.active_patient_dict = {}
+                if self.unsaved_changes == True:
+                    self.discardChanges()
             self.tree_widget_data.takeTopLevelItem(patient_idx)
+            
 
     
     def __updatePatientInModules(self):
