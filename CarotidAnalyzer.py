@@ -34,7 +34,7 @@ class CarotidAnalyzer(QMainWindow, Ui_MainWindow):
         self.compute_threads_active = 0
         self.working_dir = ""
         self.patient_data = []
-        self.active_patient_dict = {}
+        self.active_patient_dict = {'patient_ID':None}
         self.active_patient_tree_widget_item = None
         self.data = []
         self.locations = []
