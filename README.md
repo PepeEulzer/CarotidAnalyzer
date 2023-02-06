@@ -1,8 +1,32 @@
 # Carotid Analyzer
 
-A full pipeline for cropping, segmentation, centerline computation, and interactive visualization of carotid artery geometries.
+A full pipeline for cropping, model extraction, centerline computation, and interactive visualization of carotid artery geometries.
 
-### Setup
+## Files
+
+```C
+carotidanalyzer
+├───modules // All module widgets and associated classes are contained here.
+│   └───CenterlineModule.py // Module for generating centerlines.
+│   └───CropModule.py // Module for cropping CTA volumes.
+│   └───Interactors.py // Image and 3D interactors shared across modules.
+│   └───Predictor.py // CNN for plaque/lumen label prediction.
+│   └───SegmentationModule.py // Module for segmenting cropped images.
+│   └───StenosisClassifier.py // Module for interactive stenosis classification.
+├───scripts // Additional scripts for testing purposes, NOT referenced in the application.
+├───ui // QT Designer UI and resource source files, NOT referenced in the application.
+│   └───resources
+│   └───mainwindow.ui
+│   └───resources.qrc
+└───CarotidAnalyzer.py // Main application, run this for execution.
+└───defaults.py // Global constants (colors, symbols...)
+└───mainwindow_ui.py 
+└───models.zip
+└───resources_rc.py
+└───seg_model_weights.pth
+```
+
+## Setup
 
 Main dependencies
 - Python 3.10
