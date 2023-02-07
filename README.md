@@ -4,6 +4,11 @@ A full pipeline for cropping, model extraction, centerline computation, and inte
 
 ![Pipeline Overview](./img/carotid_pipeline.png)
 
+## Database
+The carotid bifurcation model database is available at: [https://cloud.uni-jena.de/s/YpgpzDmBFC3NRa8](https://cloud.uni-jena.de/s/YpgpzDmBFC3NRa8). After download, it can be used a target folder for the application.
+
+> Note that the database contains only the reconstructed models and centerlines. The CTA scans are not public to preserve patient privacy.
+
 ## Files
 
 - `modules` All module widgets and associated classes are contained here.
@@ -21,7 +26,6 @@ A full pipeline for cropping, model extraction, centerline computation, and inte
 - `CarotidAnalyzer.py` Main application, run this for execution.
 - `defaults.py` Global constants (colors, symbols...)
 - `mainwindow_ui.py` Compiled UI file.
-- `models.zip` The carotid bifurcation model database. Can be used as a target folder for the application.
 - `resources_rc.py` Compiled resource file.
 - `seg_model_weights.pth` CNN weights trained for carotid bifurcation lumen and plaque labelling.
 
