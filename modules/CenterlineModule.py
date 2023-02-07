@@ -366,8 +366,8 @@ class CenterlineModule(QTabWidget):
     def save(self):
         patient_ID = self.patient_dict['patient_ID']
         base_path  = self.patient_dict['base_path']
-        path_right = os.path.join(base_path, "models", patient_ID + "_right_lumen_centerlines.vtp")
-        path_left  = os.path.join(base_path, "models", patient_ID + "_left_lumen_centerlines.vtp")
+        path_right = os.path.join(base_path, patient_ID + "_right_lumen_centerlines.vtp")
+        path_left  = os.path.join(base_path, patient_ID + "_left_lumen_centerlines.vtp")
         self.centerline_module_right.saveChanges(path_right)
         self.centerline_module_left.saveChanges(path_left)
         self.setTabText(0, "Right")

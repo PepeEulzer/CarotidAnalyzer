@@ -869,13 +869,13 @@ class SegmentationModule(QTabWidget):
         base_path  = self.patient_dict['base_path']
 
         path_seg = os.path.join(base_path, patient_ID + "_right.seg.nrrd")
-        path_lumen = os.path.join(base_path, "models", patient_ID + "_right_lumen.stl")
-        path_plaque = os.path.join(base_path, "models", patient_ID + "_right_plaque.stl")
+        path_lumen = os.path.join(base_path, patient_ID + "_right_lumen.stl")
+        path_plaque = os.path.join(base_path, patient_ID + "_right_plaque.stl")
         self.segmentation_module_right.saveChanges(path_seg, path_lumen, path_plaque)
         
         path_seg = os.path.join(base_path, patient_ID + "_left.seg.nrrd")
-        path_lumen = os.path.join(base_path, "models", patient_ID + "_left_lumen.stl")
-        path_plaque = os.path.join(base_path, "models", patient_ID + "_left_plaque.stl")
+        path_lumen = os.path.join(base_path, patient_ID + "_left_lumen.stl")
+        path_plaque = os.path.join(base_path, patient_ID + "_left_plaque.stl")
         self.segmentation_module_left.saveChanges(path_seg, path_lumen, path_plaque)
 
         self.setTabText(0, "Right")
