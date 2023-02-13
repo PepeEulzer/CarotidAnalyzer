@@ -5,7 +5,7 @@ A full pipeline for cropping, model extraction, centerline computation, and inte
 ![Pipeline Overview](./img/carotid_pipeline.png)
 
 ## Database
-The carotid bifurcation model database is available at: [https://cloud.uni-jena.de/s/YpgpzDmBFC3NRa8](https://cloud.uni-jena.de/s/YpgpzDmBFC3NRa8). After download, it can be used as a target folder for the application.
+The carotid bifurcation model database is available at: [https://doi.org/10.5281/zenodo.7634644](https://doi.org/10.5281/zenodo.7634644). After download, it can be used as a target folder for the application.
 
 > Note that the database contains only the reconstructed models and centerlines. The CTA scans are not public to preserve patient privacy.
 
@@ -56,6 +56,7 @@ conda create -n CarotidAnalyzer pytorch torchvision torchaudio pytorch-cuda=11.7
 > ```bash
 > conda create -n CarotidAnalyzer pytorch torchvision torchaudio cpuonly -c pytorch
 > ```
+> See also the [PyTorch](https://pytorch.org/get-started/locally/) installation instructions.
 
 Then, install the other packages:
 
