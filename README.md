@@ -5,7 +5,7 @@ A full pipeline for cropping, model extraction, centerline computation, and inte
 ![Pipeline Overview](./img/carotid_pipeline.png)
 
 ## Database
-The carotid bifurcation model database is available at: [https://doi.org/10.5281/zenodo.7634644](https://doi.org/10.5281/zenodo.7634644). After download, it can be used as a target folder for the application.
+The carotid bifurcation model database is available at: [https://doi.org/10.5281/zenodo.7634643](https://doi.org/10.5281/zenodo.7634643). After download, it can be used as a target folder for the application.
 
 > Note that the database contains only the reconstructed models and centerlines. The CTA scans are not public to preserve patient privacy.
 
