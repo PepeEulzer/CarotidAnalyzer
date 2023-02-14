@@ -22,6 +22,7 @@ from modules.CropModule import CropModule
 from modules.CenterlineModule import CenterlineModule
 from modules.SegmentationModule import SegmentationModule
 from modules.StenosisClassifier import StenosisClassifier
+from modules.FlowCompModule import FlowCompModule
 
 class CarotidAnalyzer(QMainWindow, Ui_MainWindow):
     def __init__(self, parent=None):
@@ -46,17 +47,19 @@ class CarotidAnalyzer(QMainWindow, Ui_MainWindow):
         self.segmentation_module = SegmentationModule(self)
         self.centerline_module = CenterlineModule(self)
         self.stenosis_classifier = StenosisClassifier(self)
+        self.flowComp_module = FlowCompModule(self)
         self.module_stack.addWidget(self.crop_module)
         self.module_stack.addWidget(self.segmentation_module)
         self.module_stack.addWidget(self.centerline_module)
         self.module_stack.addWidget(self.stenosis_classifier)
+        self.module_stack.addWidget(self.flowComp_module)
 
         # only one module can be active
         self.processing_modules = [
             self.action_crop_module, self.action_segmentation_module, self.action_centerline_module
         ]
         self.vis_modules = [
-            self.action_stenosis_classifier
+            self.action_stenosis_classifier, self.action_flowComp_module
         ]
         
         # connect signals to slots
@@ -68,6 +71,7 @@ class CarotidAnalyzer(QMainWindow, Ui_MainWindow):
         self.action_segmentation_module.triggered[bool].connect(self.viewSegmentationModule)
         self.action_centerline_module.triggered[bool].connect(self.viewCenterlineModule)
         self.action_stenosis_classifier.triggered[bool].connect(self.viewStenosisClassifier)
+        self.action_flowComp_module.triggered[bool].connect(self.viewFlowCompModule)
         self.action_discard_changes.triggered.connect(self.discardChanges)
         self.action_save_and_propagate.triggered.connect(self.saveAndPropagate)
         self.action_quit.triggered.connect(self.close)
@@ -310,6 +314,9 @@ class CarotidAnalyzer(QMainWindow, Ui_MainWindow):
             for i in range(self.tree_widget_data.topLevelItemCount()):
                 self.tree_widget_data.topLevelItem(i).setExpanded(False)
         
+        # propagate directory to modules with global view
+        self.flowComp_module.setWorkingDir(self.working_dir, self.patient_data)
+        
     
     def openWorkingDirDialog(self):
         dir = QFileDialog.getExistingDirectory(self, "Set Working Directory")
@@ -377,8 +384,9 @@ class CarotidAnalyzer(QMainWindow, Ui_MainWindow):
             patient_idx = self.tree_widget_data.indexOfTopLevelItem(selected)
             shutil.rmtree(os.path.join(self.working_dir, patient))
             del self.patient_data[patient_idx]
+            self.flowComp_module.setWorkingDir(self.working_dir, self.patient_data) # TODO full reload might be redundant
             if patient == self.active_patient_dict['patient_ID']:
-                self.active_patient_dict = dict.fromkeys(self.active_patient_dict,False)
+                self.active_patient_dict = dict.fromkeys(self.active_patient_dict, False)
                 self.__updatePatientInModules()
                 self.active_patient_dict = {}
                 if self.unsaved_changes == True:
@@ -392,6 +400,7 @@ class CarotidAnalyzer(QMainWindow, Ui_MainWindow):
         self.segmentation_module.loadPatient(self.active_patient_dict)
         self.centerline_module.loadPatient(self.active_patient_dict)
         self.stenosis_classifier.loadPatient(self.active_patient_dict)
+        self.flowComp_module.loadPatient(self.active_patient_dict)
         
 
     def __checkSegMatchesModels(self):
@@ -480,12 +489,21 @@ class CarotidAnalyzer(QMainWindow, Ui_MainWindow):
         else:
             self.module_stack.setCurrentWidget(self.empty_module)
 
-    
+
+    def viewFlowCompModule(self, on:bool):
+        if on:
+            self.uncheckInactiveModules(self.action_flowComp_module)
+            self.module_stack.setCurrentWidget(self.flowComp_module)
+        else:
+            self.module_stack.setCurrentWidget(self.empty_module)
+
+
     def setModulesClickable(self, state:bool):
         self.action_crop_module.setEnabled(state)
         self.action_segmentation_module.setEnabled(state)
         self.action_centerline_module.setEnabled(state)
         self.action_stenosis_classifier.setEnabled(state)
+        self.action_flowComp_module.setEnabled(state)
 
 
     def changesMade(self):
@@ -589,6 +607,7 @@ class CarotidAnalyzer(QMainWindow, Ui_MainWindow):
         # propagate
         self.centerline_module.loadPatient(self.active_patient_dict)
         self.stenosis_classifier.loadPatient(self.active_patient_dict)
+        self.flowComp_module.loadPatient(self.active_patient_dict)
 
     
     def newCenterlines(self):
@@ -614,6 +633,7 @@ class CarotidAnalyzer(QMainWindow, Ui_MainWindow):
 
         # propagate
         self.stenosis_classifier.loadPatient(self.active_patient_dict)
+        self.flowComp_module.loadPatient(self.active_patient_dict)
 
 
     def okToClose(self):
