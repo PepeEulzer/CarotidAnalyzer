@@ -232,6 +232,7 @@ class IsosurfaceInteractor(QVTKRenderWindowInteractor):
         # return pointer to label map if needed, return pending labels
         return label_map, plaque_pending, lumen_pending
 
+
     def updateScene(self, label_map_data, label_map_vtk):
         extent = np.array(label_map_vtk.GetExtent())
         extent += np.array([-1, 1, -1, 1, -1, 1])

@@ -674,6 +674,7 @@ class CarotidAnalyzer(QMainWindow, Ui_MainWindow):
             self.segmentation_module.close()
             self.centerline_module.close()
             self.stenosis_classifier.close()
+            self.flowComp_module.close()
             super(CarotidAnalyzer, self).closeEvent(event)
         else:
             event.ignore()
