@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 
-# Form implementation generated from reading ui file 'C:\users\pepe\Git\carotidanalyzer\ui\mainwindow.ui'
+# Form implementation generated from reading ui file 'C:\Git\carotidanalyzer\ui\mainwindow.ui'
 #
 # Created by: PyQt5 UI code generator 5.15.4
 #
@@ -17,7 +17,7 @@ class Ui_MainWindow(object):
         MainWindow.setEnabled(True)
         MainWindow.resize(1920, 1080)
         icon = QtGui.QIcon()
-        icon.addPixmap(QtGui.QPixmap(":/icons/resources/centerline.svg"), QtGui.QIcon.Normal, QtGui.QIcon.Off)
+        icon.addPixmap(QtGui.QPixmap(":/icons/resources/branch.svg"), QtGui.QIcon.Normal, QtGui.QIcon.Off)
         MainWindow.setWindowIcon(icon)
         MainWindow.setToolButtonStyle(QtCore.Qt.ToolButtonTextUnderIcon)
         self.central_widget = QtWidgets.QWidget(MainWindow)
@@ -45,7 +45,7 @@ class Ui_MainWindow(object):
         self.central_widget_layout.addWidget(self.module_stack)
         MainWindow.setCentralWidget(self.central_widget)
         self.menubar = QtWidgets.QMenuBar(MainWindow)
-        self.menubar.setGeometry(QtCore.QRect(0, 0, 1920, 21))
+        self.menubar.setGeometry(QtCore.QRect(0, 0, 1920, 31))
         self.menubar.setObjectName("menubar")
         self.menuFile = QtWidgets.QMenu(self.menubar)
         self.menuFile.setObjectName("menuFile")
@@ -161,8 +161,16 @@ class Ui_MainWindow(object):
         icon9.addPixmap(QtGui.QPixmap(":/icons/resources/delete-forever.svg"), QtGui.QIcon.Normal, QtGui.QIcon.Off)
         self.action_discard_changes.setIcon(icon9)
         self.action_discard_changes.setObjectName("action_discard_changes")
+        self.action_flowComp_module = QtWidgets.QAction(MainWindow)
+        self.action_flowComp_module.setCheckable(True)
+        icon10 = QtGui.QIcon()
+        icon10.addPixmap(QtGui.QPixmap(":/icons/resources/compare.svg"), QtGui.QIcon.Normal, QtGui.QIcon.Off)
+        self.action_flowComp_module.setIcon(icon10)
+        self.action_flowComp_module.setObjectName("action_flowComp_module")
         self.action_delete_selected_patient = QtWidgets.QAction(MainWindow)
-        self.action_delete_selected_patient.setIcon(icon9)
+        icon11 = QtGui.QIcon()
+        icon11.addPixmap(QtGui.QPixmap(":/icons/resources/delete-remove.svg"), QtGui.QIcon.Normal, QtGui.QIcon.Off)
+        self.action_delete_selected_patient.setIcon(icon11)
         self.action_delete_selected_patient.setObjectName("action_delete_selected_patient")
         self.menuFile.addAction(self.action_load_new_DICOM)
         self.menuFile.addAction(self.action_set_working_directory)
@@ -179,6 +187,7 @@ class Ui_MainWindow(object):
         self.menuView.addAction(self.action_centerline_module)
         self.menuView.addSeparator()
         self.menuView.addAction(self.action_stenosis_classifier)
+        self.menuView.addAction(self.action_flowComp_module)
         self.menubar.addAction(self.menuFile.menuAction())
         self.menubar.addAction(self.menuView.menuAction())
         self.toolbar_modules.addAction(self.action_data_inspector)
@@ -188,6 +197,7 @@ class Ui_MainWindow(object):
         self.toolbar_modules.addAction(self.action_centerline_module)
         self.toolbar_modules.addSeparator()
         self.toolbar_modules.addAction(self.action_stenosis_classifier)
+        self.toolbar_modules.addAction(self.action_flowComp_module)
         self.toolbar_save.addAction(self.action_save_and_propagate)
         self.toolbar_save.addAction(self.action_discard_changes)
 
@@ -211,8 +221,6 @@ class Ui_MainWindow(object):
         self.action_load_new_DICOM.setShortcut(_translate("MainWindow", "Ctrl+N"))
         self.action_set_working_directory.setText(_translate("MainWindow", "Set Working Directory..."))
         self.action_set_working_directory.setShortcut(_translate("MainWindow", "Ctrl+O"))
-        self.action_delete_selected_patient.setText(_translate("MainWindow", "Delete selected Patient"))
-        self.action_delete_selected_patient.setShortcut(_translate("MainWindow", "Ctrl+X"))  
         self.action_save_and_propagate.setText(_translate("MainWindow", "Save And Propagate"))
         self.action_save_and_propagate.setShortcut(_translate("MainWindow", "Ctrl+S"))
         self.action_crop_module.setText(_translate("MainWindow", "Crop Module"))
@@ -222,4 +230,7 @@ class Ui_MainWindow(object):
         self.action_stenosis_classifier.setText(_translate("MainWindow", "Stenosis Classifier"))
         self.action_data_inspector.setText(_translate("MainWindow", "Data Inspector"))
         self.action_discard_changes.setText(_translate("MainWindow", "Discard Changes"))
+        self.action_flowComp_module.setText(_translate("MainWindow", "FlowComp Module"))
+        self.action_delete_selected_patient.setText(_translate("MainWindow", "Delete Selected Case"))
+        self.action_delete_selected_patient.setShortcut(_translate("MainWindow", "Ctrl+X"))
 import resources_rc

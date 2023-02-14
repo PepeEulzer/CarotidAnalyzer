@@ -1,5 +1,8 @@
 <RCC>
   <qresource prefix="icons">
+    <file>resources/delete-remove.svg</file>
+    <file>resources/branch.svg</file>
+    <file>resources/compare.svg</file>
     <file>resources/centerline.svg</file>
     <file>resources/chart-bell-curve-cumulative.svg</file>
     <file>resources/crop.svg</file>

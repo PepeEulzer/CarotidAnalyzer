@@ -18,7 +18,7 @@
   </property>
   <property name="windowIcon">
    <iconset resource="resources.qrc">
-    <normaloff>:/icons/resources/centerline.svg</normaloff>:/icons/resources/centerline.svg</iconset>
+    <normaloff>:/icons/resources/branch.svg</normaloff>:/icons/resources/branch.svg</iconset>
   </property>
   <property name="toolButtonStyle">
    <enum>Qt::ToolButtonTextUnderIcon</enum>
@@ -72,7 +72,7 @@
      <x>0</x>
      <y>0</y>
      <width>1920</width>
-     <height>21</height>
+     <height>31</height>
     </rect>
    </property>
    <widget class="QMenu" name="menuFile">
@@ -81,6 +81,7 @@
     </property>
     <addaction name="action_load_new_DICOM"/>
     <addaction name="action_set_working_directory"/>
+    <addaction name="action_delete_selected_patient"/>
     <addaction name="separator"/>
     <addaction name="action_save_and_propagate"/>
     <addaction name="action_discard_changes"/>
@@ -98,6 +99,7 @@
     <addaction name="action_centerline_module"/>
     <addaction name="separator"/>
     <addaction name="action_stenosis_classifier"/>
+    <addaction name="action_flowComp_module"/>
    </widget>
    <addaction name="menuFile"/>
    <addaction name="menuView"/>
@@ -129,6 +131,7 @@
    <addaction name="action_centerline_module"/>
    <addaction name="separator"/>
    <addaction name="action_stenosis_classifier"/>
+   <addaction name="action_flowComp_module"/>
   </widget>
   <widget class="QToolBar" name="toolbar_save">
    <property name="windowTitle">
@@ -385,6 +388,30 @@
    </property>
    <property name="text">
     <string>Discard Changes</string>
+   </property>
+  </action>
+  <action name="action_flowComp_module">
+   <property name="checkable">
+    <bool>true</bool>
+   </property>
+   <property name="icon">
+    <iconset resource="resources.qrc">
+     <normaloff>:/icons/resources/compare.svg</normaloff>:/icons/resources/compare.svg</iconset>
+   </property>
+   <property name="text">
+    <string>FlowComp Module</string>
+   </property>
+  </action>
+  <action name="action_delete_selected_patient">
+   <property name="icon">
+    <iconset resource="resources.qrc">
+     <normaloff>:/icons/resources/delete-remove.svg</normaloff>:/icons/resources/delete-remove.svg</iconset>
+   </property>
+   <property name="text">
+    <string>Delete Selected Case</string>
+   </property>
+   <property name="shortcut">
+    <string>Ctrl+X</string>
    </property>
   </action>
  </widget>
