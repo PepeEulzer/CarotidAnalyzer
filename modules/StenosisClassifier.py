@@ -12,11 +12,6 @@ import pyqtgraph as pg
 
 from defaults import *
 
-# Override pyqtgraph defaults
-pg.setConfigOption('background', 'w')
-pg.setConfigOption('foreground', 'k')
-pg.setConfigOption('antialias', True)
-
 # quantitative colors
 STENOSIS_COLORS = [(27,158,119),
                    (217,95,2),

@@ -8,6 +8,7 @@ import numpy as np
 import nrrd
 import pydicom
 import vtk
+import pyqtgraph as pg
 from vtk.util.numpy_support import numpy_to_vtk
 from PyQt5.QtCore import QSettings, QVariant, QObject, QThread, pyqtSignal
 from PyQt5.QtWidgets import (
@@ -23,6 +24,12 @@ from modules.CenterlineModule import CenterlineModule
 from modules.SegmentationModule import SegmentationModule
 from modules.StenosisClassifier import StenosisClassifier
 from modules.FlowCompModule import FlowCompModule
+
+# Override pyqtgraph defaults
+pg.setConfigOption('background', 'w')
+pg.setConfigOption('foreground', 'k')
+pg.setConfigOption('antialias', True)
+pg.setConfigOption('imageAxisOrder', 'row-major')
 
 class CarotidAnalyzer(QMainWindow, Ui_MainWindow):
     def __init__(self, parent=None):
