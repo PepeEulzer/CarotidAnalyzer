@@ -13,6 +13,23 @@ from defaults import *
 
 MAP_FIELD_NAMES = ['WSS_systolic', 'WSS_diastolic', 'longitudinal_WSS_systolic', 'longitudinal_WSS_diastolic']
 
+# TODO move from global namespace
+ctf_viridis = vtk.vtkColorTransferFunction()
+ctf_viridis.SetColorSpaceToLab()
+ctf_viridis.AddRGBPoint(1.0, 0.39, 0.2, 0.18)
+ctf_viridis.AddRGBPoint(0.75, 0.51, 0.35, 0.47)
+ctf_viridis.AddRGBPoint(0.5, 0.37, 0.59, 0.7)
+ctf_viridis.AddRGBPoint(0.25, 0.31, 0.81, 0.67)
+ctf_viridis.AddRGBPoint(0.0, 0.81, 0.95, 0.47)
+def getLUTviridis(range_min, range_max):
+    lut = vtk.vtkLookupTable()
+    lut.SetNumberOfTableValues(255)
+    lut.SetTableRange(range_min, range_max)
+    for i in range(255):
+        rgb = ctf_viridis.GetColor(i/255)
+        lut.SetTableValue(i, rgb[0], rgb[1], rgb[2])
+    return lut
+
 class FlowCompModule(QWidget):
     """
     Visualization module for comparing a new geometry to similar geometries with computed flow field.
@@ -86,18 +103,7 @@ class FlowCompModule(QWidget):
         self.comp_patient_view.GetRenderWindow().AddRenderer(self.comp_patient_renderer)
 
         # comparison patients vtk pipelines
-        self.comp_patient_reader_lumen = vtk.vtkSTLReader() # TODO make lists, TODO unstructured grid readers
-        self.comp_patient_reader_plaque = vtk.vtkSTLReader()
-        self.comp_patient_mapper_lumen = vtk.vtkPolyDataMapper()
-        self.comp_patient_mapper_plaque = vtk.vtkPolyDataMapper()
-        self.comp_patient_mapper_lumen.SetInputConnection(self.comp_patient_reader_lumen.GetOutputPort())
-        self.comp_patient_mapper_plaque.SetInputConnection(self.comp_patient_reader_plaque.GetOutputPort())
-        self.comp_patient_actor_lumen = vtk.vtkActor()
-        self.comp_patient_actor_plaque = vtk.vtkActor()
-        self.comp_patient_actor_lumen.SetMapper(self.comp_patient_mapper_lumen)
-        self.comp_patient_actor_plaque.SetMapper(self.comp_patient_mapper_plaque)
-        self.comp_patient_actor_lumen.GetProperty().SetColor(COLOR_LUMEN) # TODO use active colormapping
-        self.comp_patient_actor_plaque.GetProperty().SetColor(COLOR_PLAQUE)
+        self.comp_patient_actors = []
 
         # 3D views vertical splitter
         self.splitter_3D = QSplitter(self)
@@ -173,21 +179,43 @@ class FlowCompModule(QWidget):
 
     def mapClicked(self, id):
         img_box_clicked = self.map_views[id].centralWidget
-        
-        # add box to active items if new
-        if img_box_clicked.id not in self.active_map_ids:
+        id = img_box_clicked.id
+        if id not in self.active_map_ids:
+            # box is new -> activate
             self.active_map_ids.append(img_box_clicked.id)
             img_box_clicked.setActivated(True, len(self.active_map_ids))
+
+            # create a 3D view for the map
+            reader = vtk.vtkXMLUnstructuredGridReader()
+            reader.SetFileName(self.surface_dataset_paths[id])
+            reader.Update()
+            surface = reader.GetOutput()
+            surface.GetPointData().SetActiveScalars(self.active_field_name)
+            mapper = vtk.vtkDataSetMapper()
+            mapper.SetInputData(surface)
+            mapper.SetScalarRange(self.map_scale_min[self.active_field_name], self.map_scale_max[self.active_field_name]) # TODO use current range
+            mapper.SetLookupTable(getLUTviridis(0, 1)) # TODO use current LUT
+            actor = vtk.vtkActor()
+            actor.SetMapper(mapper)
+            self.comp_patient_actors.append(actor)
+            self.comp_patient_renderer.AddActor(actor)
+            self.comp_patient_renderer.ResetCamera()
         
-        # remove box if active
         else:
-            self.active_map_ids.remove(img_box_clicked.id)
+            # box is already active -> deactive
+            index = self.active_map_ids.index(id)
+            self.active_map_ids.pop(index)
             img_box_clicked.setActivated(False)
 
-        # update the active items
+            # remove 3D view
+            actor = self.comp_patient_actors.pop(index)
+            self.comp_patient_renderer.RemoveActor(actor)
+
+        # update the active items, update scenes
         for i in range(len(self.active_map_ids)):
             id = self.active_map_ids[i]
             self.map_views[id].centralWidget.setIdText(i+1)
+        self.comp_patient_view.GetRenderWindow().Render()
 
 
     def loadPatient(self, patient_dict):
