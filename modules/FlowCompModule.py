@@ -5,6 +5,7 @@ import pyqtgraph as pg
 
 from glob import glob
 from PyQt5.QtWidgets import QWidget, QGridLayout, QHBoxLayout, QVBoxLayout, QLabel, QSplitter, QComboBox
+from PyQt5.QtCore import Qt, pyqtSignal
 from PyQt5 import QtCore, QtGui
 from vtk.qt.QVTKRenderWindowInteractor import QVTKRenderWindowInteractor
 
@@ -25,6 +26,9 @@ class FlowCompModule(QWidget):
         # latent space data
         self.map_datasets = []
         self.map_views = []
+        self.surface_dataset_paths = []
+        self.flow_dataset_paths = []
+        self.active_map_ids = []
         self.active_field_name = 'WSS_systolic'
         self.map_scale_min = {'WSS_systolic':0,   'WSS_diastolic':0,   'longitudinal_WSS_systolic':-50, 'longitudinal_WSS_systolic':-50}
         self.map_scale_max = {'WSS_systolic':300, 'WSS_diastolic':300, 'longitudinal_WSS_systolic':0,   'longitudinal_WSS_systolic':0}
@@ -110,7 +114,7 @@ class FlowCompModule(QWidget):
 
         # 3D/latent horizontal splitter
         self.splitter_horizontal = QSplitter(self)
-        self.splitter_horizontal.setOrientation(QtCore.Qt.Vertical)
+        self.splitter_horizontal.setOrientation(Qt.Vertical)
         self.splitter_horizontal.addWidget(self.splitter_3D)
         self.splitter_horizontal.addWidget(self.latent_space_widget)
         self.splitter_horizontal.setStretchFactor(0, 3)
@@ -132,27 +136,28 @@ class FlowCompModule(QWidget):
         self.working_dir = dir
         self.patient_data = patient_data
 
-        # load all map image stacks
-        map_file_pattern = os.path.join(self.working_dir, "flow_wall_data", "patient*_map_images.npz")
-        self.map_datasets = [np.load(f) for f in glob(map_file_pattern)]
+        # load latent space cases
+        self.map_datasets.clear()
+        self.surface_dataset_paths.clear()
+        surface_file_pattern = os.path.join(self.working_dir, "flow_wall_data", "patient*_wss.vtu")
+        for filename in glob(surface_file_pattern):
+            map_file = filename[:-4] + "_map_images.npz"
+            if os.path.exists(map_file):
+                self.surface_dataset_paths.append(filename)
+                self.map_datasets.append(np.load(map_file))
 
         # create all map widgets with the currently active image
         levels = (self.map_scale_min[self.active_field_name], self.map_scale_max[self.active_field_name])
+        colormap = pg.colormap.get('viridis') # TODO use active colormap
         self.map_views = []
-        for map_dataset in self.map_datasets:
+        for id, map_dataset in enumerate(self.map_datasets):
             # create image item
             img_data = map_dataset[self.active_field_name]
-            img = pg.ImageItem(img_data)
-            img.setLevels(levels)
-            img.setColorMap(pg.colormap.get('viridis')) # TODO use active colormap
+            img_box = LatentSpaceItem(id, img_data, levels, colormap)
+            img_box.clicked[int].connect(self.mapClicked)
 
-            # create bar stack item
-            bar_stack = BarStackItem(img_data.shape[0], img_data.shape[1], [1.0, 1.0, 1.0], ['r', 'g', 'b'], thickness=50.0)
-
-            # add to layout
-            img_box = pg.ViewBox(border=None, lockAspect=True, enableMouse=False, enableMenu=False, defaultPadding=0)
-            img_box.addItem(img)
-            img_box.addItem(bar_stack)
+            # add to view, required to add to a qt layout
+            # get img_box with view.centralWidget
             view = pg.GraphicsView()
             view.setCentralWidget(img_box)
             self.map_views.append(view)
@@ -166,8 +171,23 @@ class FlowCompModule(QWidget):
             self.latent_space_layout.addWidget(self.map_views[i])
     
 
-    def clicked(self, ev):
-        print("Clicked!")
+    def mapClicked(self, id):
+        img_box_clicked = self.map_views[id].centralWidget
+        
+        # add box to active items if new
+        if img_box_clicked.id not in self.active_map_ids:
+            self.active_map_ids.append(img_box_clicked.id)
+            img_box_clicked.setActivated(True, len(self.active_map_ids))
+        
+        # remove box if active
+        else:
+            self.active_map_ids.remove(img_box_clicked.id)
+            img_box_clicked.setActivated(False)
+
+        # update the active items
+        for i in range(len(self.active_map_ids)):
+            id = self.active_map_ids[i]
+            self.map_views[id].centralWidget.setIdText(i+1)
 
 
     def loadPatient(self, patient_dict):
@@ -222,6 +242,51 @@ class FlowCompModule(QWidget):
 
 
 
+class LatentSpaceItem(pg.ViewBox):
+    clicked = pyqtSignal(int)
+    def __init__(self, id, img_data, levels, colormap, parent=None):
+        super().__init__(parent=parent, border=None, lockAspect=True, enableMouse=False, enableMenu=False, defaultPadding=0)
+        self.id = id
+
+        # create internal items
+        self.bar_stack = BarStackItem(img_data.shape[0], img_data.shape[1], [1.0, 1.0, 1.0], ['r', 'g', 'b'], thickness=50.0)
+        self.img = pg.ImageItem(img_data)
+        self.img.setLevels(levels)
+        self.img.setColorMap(colormap)
+        self.identifier_text_item = pg.TextItem(
+            text='0', 
+            color=(0, 0, 0), 
+            anchor=(0.5, 1), 
+            border=pg.mkPen(0, 0, 0), 
+            fill=pg.mkBrush(255, 255, 255)
+        )
+        self.identifier_text_item.setPos(img_data.shape[1]*0.5, img_data.shape[0]*0.05)
+
+
+        # add items to the view
+        self.addItem(self.bar_stack)
+        self.addItem(self.img)
+
+
+    def mousePressEvent(self, ev):
+        self.clicked.emit(self.id)
+
+    
+    def setActivated(self, activate, display_nr=0):
+        if activate:
+            self.img.setBorder(pg.mkPen((100, 100, 100), width=3))
+            self.addItem(self.identifier_text_item)
+        else:
+            self.img.setBorder(None)
+            self.removeItem(self.identifier_text_item)
+
+    
+    def setIdText(self, nr):
+            self.identifier_text_item.setText(str(nr))
+
+
+
+
 class BarStackItem(pg.GraphicsObject):
     def __init__(self, y_offset, x_width, normalized_values_list, colors_list, thickness):
         super().__init__()
@@ -232,6 +297,7 @@ class BarStackItem(pg.GraphicsObject):
         self.colors.reverse() # colors are internally ordered bottom->top
         self.generatePicture()
     
+
     def generatePicture(self):
         self.picture = QtGui.QPicture()
         p = QtGui.QPainter(self.picture)
@@ -240,8 +306,10 @@ class BarStackItem(pg.GraphicsObject):
             p.drawRect(QtCore.QRectF(0.0, self.y_offset + self.thickness*(i+1), self.ends[i], self.thickness))
         p.end()
     
+
     def paint(self, p, *args):
         p.drawPicture(0, 0, self.picture)
+
 
     def boundingRect(self):
         return QtCore.QRectF(self.picture.boundingRect())
