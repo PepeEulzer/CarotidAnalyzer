@@ -213,7 +213,7 @@ class FlowCompModule(QWidget):
             self.map_views[id].centralWidget.setIdText(i+1)
 
             # update viewports
-            row = int(i / nr_cols)
+            row = nr_rows - 1 - int(i / nr_cols) # top -> bottom rows
             col = int(i % nr_cols)
             self.comp_patient_containers[i].renderer.SetViewport(col * w, row * h, (col + 1) * w, (row + 1) * h)
             self.comp_patient_containers[i].setIdText(i+1)
@@ -356,14 +356,14 @@ class LatentSpace3DContainer():
         # id text
         self.identifier_text = vtk.vtkTextActor()
         self.identifier_text.SetInput(str(identifier))
-        self.identifier_text.SetPosition(50, 10)
+        # self.identifier_text.SetPosition(50, 10)
         p = self.identifier_text.GetTextProperty()
         p.SetColor(0, 0, 0)
         p.SetFontSize(20)
+        # p.SetJustificationToCentered()
         # p.FrameOn()
         # p.SetFrameColor(0, 0, 0)
         p.SetBackgroundColor(1, 1, 1)
-        p.SetJustificationToCentered()
 
         # 3D surface object
         reader = vtk.vtkXMLUnstructuredGridReader()
