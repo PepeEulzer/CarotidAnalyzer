@@ -90,20 +90,14 @@ class FlowCompModule(QWidget):
         self.active_patient_actor_lumen.GetProperty().SetColor(COLOR_LUMEN)
         self.active_patient_actor_plaque.GetProperty().SetColor(COLOR_PLAQUE)
 
-        # comparison patients model view
+        # comparison patients vtk objects
         style = vtk.vtkInteractorStyleTrackballCamera()
         self.comp_patient_view = QVTKRenderWindowInteractor()
         self.comp_patient_view.SetInteractorStyle(style)
-        self.comp_patient_renderer = vtk.vtkRenderer() # TODO make lists
-        self.comp_patient_renderer.SetBackground(1,1,1)
-        self.comp_patient_camera = self.comp_patient_renderer.GetActiveCamera()
-        self.comp_patient_camera.SetPosition(0, 0, -100)
-        self.comp_patient_camera.SetFocalPoint(0, 0, 0)
-        self.comp_patient_camera.SetViewUp(0, -1, 0)
-        self.comp_patient_view.GetRenderWindow().AddRenderer(self.comp_patient_renderer)
-
-        # comparison patients vtk pipelines
-        self.comp_patient_actors = []
+        self.comp_patient_containers = []
+        self.background_renderer = vtk.vtkRenderer()
+        self.background_renderer.SetBackground(1,1,1)
+        self.comp_patient_view.GetRenderWindow().AddRenderer(self.background_renderer)
 
         # 3D views vertical splitter
         self.splitter_3D = QSplitter(self)
@@ -182,24 +176,20 @@ class FlowCompModule(QWidget):
         id = img_box_clicked.id
         if id not in self.active_map_ids:
             # box is new -> activate
+            identifier_text = len(self.active_map_ids)
             self.active_map_ids.append(img_box_clicked.id)
-            img_box_clicked.setActivated(True, len(self.active_map_ids))
+            img_box_clicked.setActivated(True, identifier_text)
 
-            # create a 3D view for the map
-            reader = vtk.vtkXMLUnstructuredGridReader()
-            reader.SetFileName(self.surface_dataset_paths[id])
-            reader.Update()
-            surface = reader.GetOutput()
-            surface.GetPointData().SetActiveScalars(self.active_field_name)
-            mapper = vtk.vtkDataSetMapper()
-            mapper.SetInputData(surface)
-            mapper.SetScalarRange(self.map_scale_min[self.active_field_name], self.map_scale_max[self.active_field_name]) # TODO use current range
-            mapper.SetLookupTable(getLUTviridis(0, 1)) # TODO use current LUT
-            actor = vtk.vtkActor()
-            actor.SetMapper(mapper)
-            self.comp_patient_actors.append(actor)
-            self.comp_patient_renderer.AddActor(actor)
-            self.comp_patient_renderer.ResetCamera()
+            # create a container for 3D vis of selected map
+            container = LatentSpace3DContainer(
+                surface_file_path=self.surface_dataset_paths[id],
+                active_field_name=self.active_field_name,
+                scale_min=self.map_scale_min[self.active_field_name],
+                scale_max=self.map_scale_max[self.active_field_name], # TODO provide current levels
+                identifier=identifier_text
+                )
+            self.comp_patient_containers.append(container)
+            self.comp_patient_view.GetRenderWindow().AddRenderer(container.renderer)
         
         else:
             # box is already active -> deactive
@@ -207,14 +197,28 @@ class FlowCompModule(QWidget):
             self.active_map_ids.pop(index)
             img_box_clicked.setActivated(False)
 
-            # remove 3D view
-            actor = self.comp_patient_actors.pop(index)
-            self.comp_patient_renderer.RemoveActor(actor)
+            # remove actor, camera, renderer
+            container = self.comp_patient_containers.pop(index)
+            self.comp_patient_view.GetRenderWindow().RemoveRenderer(container.renderer)
 
         # update the active items, update scenes
-        for i in range(len(self.active_map_ids)):
+        nr_maps = len(self.active_map_ids)
+        if nr_maps > 0:
+            nr_rows = int(np.rint(np.sqrt(nr_maps)))
+            nr_cols = int(np.ceil(nr_maps / nr_rows))
+            h = 1.0 / nr_rows # single viewport height
+            w = 1.0 / nr_cols # single viewport width
+        for i in range(nr_maps):
             id = self.active_map_ids[i]
             self.map_views[id].centralWidget.setIdText(i+1)
+
+            # update viewports
+            row = int(i / nr_cols)
+            col = int(i % nr_cols)
+            self.comp_patient_containers[i].renderer.SetViewport(col * w, row * h, (col + 1) * w, (row + 1) * h)
+            self.comp_patient_containers[i].setIdText(i+1)
+
+        # render all comparison views
         self.comp_patient_view.GetRenderWindow().Render()
 
 
@@ -314,7 +318,6 @@ class LatentSpaceItem(pg.ViewBox):
 
 
 
-
 class BarStackItem(pg.GraphicsObject):
     def __init__(self, y_offset, x_width, normalized_values_list, colors_list, thickness):
         super().__init__()
@@ -341,3 +344,65 @@ class BarStackItem(pg.GraphicsObject):
 
     def boundingRect(self):
         return QtCore.QRectF(self.picture.boundingRect())
+
+
+
+class LatentSpace3DContainer():
+    """
+    Provides access to 3D items (camera, renderer, actor, mapper...)
+    of one comparison case.
+    """
+    def __init__(self, surface_file_path, active_field_name, scale_min, scale_max, identifier):
+        # id text
+        self.identifier_text = vtk.vtkTextActor()
+        self.identifier_text.SetInput(str(identifier))
+        self.identifier_text.SetPosition(50, 10)
+        p = self.identifier_text.GetTextProperty()
+        p.SetColor(0, 0, 0)
+        p.SetFontSize(20)
+        # p.FrameOn()
+        # p.SetFrameColor(0, 0, 0)
+        p.SetBackgroundColor(1, 1, 1)
+        p.SetJustificationToCentered()
+
+        # 3D surface object
+        reader = vtk.vtkXMLUnstructuredGridReader()
+        reader.SetFileName(surface_file_path)
+        reader.Update()
+        self.surface = reader.GetOutput()
+        self.surface.GetPointData().SetActiveScalars(active_field_name)
+        self.mapper = vtk.vtkDataSetMapper()
+        self.mapper.SetInputData(self.surface)
+        self.mapper.SetScalarRange(scale_min, scale_max)
+        self.mapper.SetLookupTable(getLUTviridis(0, 1)) # TODO use current LUT
+        self.actor = vtk.vtkActor()
+        self.actor.SetMapper(self.mapper)
+
+        # create a renderer, save own camera (viewports will be set later)
+        self.renderer = vtk.vtkRenderer()
+        self.renderer.SetBackground(1, 1, 1)
+        self.camera = self.renderer.GetActiveCamera()
+        self.camera.SetPosition(0, 0, -100)
+        self.camera.SetFocalPoint(0, 0, 0)
+        self.camera.SetViewUp(0, -1, 0)
+        self.renderer.AddActor(self.actor)
+        self.renderer.AddActor(self.identifier_text)
+        self.renderer.ResetCamera()
+    
+    def setIdText(self, identifier):
+        self.identifier_text.SetInput(str(identifier))
+    
+    def setScalars(self, field_name):
+        self.surface.GetPointData().SetActiveScalars(field_name)
+
+    def setColormap(self, LUT):
+        self.mapper.SetLookupTable(getLUTviridis(0, 1)) # TODO use current LUT
+
+    def setColormapRange(self, scale_min, scale_max):
+        self.mapper.SetScalarRange(scale_min, scale_max)
+
+    def useSynchedCamera(self, cam):
+        self.renderer.SetActiveCamera(cam)
+
+    def useOwnCamera(self):
+        self.renderer.SetActiveCamera(self.camera)
