@@ -43,7 +43,7 @@ class FlowCompModule(QWidget):
         # latent space data
         self.map_datasets = []
         self.map_views = []
-        self.surface_dataset_paths = []
+        self.surface_dataset_paths = [] # TODO integrate into container?
         self.flow_dataset_paths = []
         self.active_map_ids = []
         self.active_field_name = 'WSS_systolic'
@@ -136,6 +136,9 @@ class FlowCompModule(QWidget):
         self.working_dir = dir
         self.patient_data = patient_data
 
+        # clear current view
+        self.reset()
+
         # load latent space cases
         self.map_datasets.clear()
         self.surface_dataset_paths.clear()
@@ -162,11 +165,8 @@ class FlowCompModule(QWidget):
             view.setCentralWidget(img_box)
             self.map_views.append(view)
 
-        # reset layout
-        while not self.latent_space_layout.isEmpty():
-            self.latent_space_layout.removeWidget(self.latent_space_layout.itemAt(0))
-
         # initial latent space view, unsorted
+        self.nr_latent_space_items = min(10, len(self.map_views))
         for i in range(self.nr_latent_space_items):
             self.latent_space_layout.addWidget(self.map_views[i])
     
@@ -176,17 +176,15 @@ class FlowCompModule(QWidget):
         id = img_box_clicked.id
         if id not in self.active_map_ids:
             # box is new -> activate
-            identifier_text = len(self.active_map_ids)
             self.active_map_ids.append(img_box_clicked.id)
-            img_box_clicked.setActivated(True, identifier_text)
+            img_box_clicked.setActivated(True)
 
             # create a container for 3D vis of selected map
             container = LatentSpace3DContainer(
                 surface_file_path=self.surface_dataset_paths[id],
                 active_field_name=self.active_field_name,
                 scale_min=self.map_scale_min[self.active_field_name],
-                scale_max=self.map_scale_max[self.active_field_name], # TODO provide current levels
-                identifier=identifier_text
+                scale_max=self.map_scale_max[self.active_field_name] # TODO provide current levels
                 )
             self.comp_patient_containers.append(container)
             self.comp_patient_view.GetRenderWindow().AddRenderer(container.renderer)
@@ -264,8 +262,25 @@ class FlowCompModule(QWidget):
 
 
     def reset(self):
-        # TODO necessary?
-        print("Removing all actors, resetting views")
+        # remove active patient
+        self.active_patient_renderer.RemoveActor(self.active_patient_actor_lumen)
+        self.active_patient_renderer.RemoveActor(self.active_patient_actor_plaque)
+
+        # remove map views from latent space navigator but keep map cache
+        for w in self.map_views:
+            self.latent_space_layout.removeWidget(w)
+
+        # delete active 3D views of map
+        for id in self.active_map_ids:
+            self.map_views[id].centralWidget.setActivated(False)
+        self.active_map_ids.clear()
+        for c in self.comp_patient_containers:
+            self.comp_patient_view.GetRenderWindow().RemoveRenderer(c.renderer)
+        self.comp_patient_containers.clear()
+
+        # render views
+        self.active_patient_view.GetRenderWindow().Render()
+        self.comp_patient_view.GetRenderWindow().Render()
 
 
     def close(self):
@@ -304,7 +319,7 @@ class LatentSpaceItem(pg.ViewBox):
         self.clicked.emit(self.id)
 
     
-    def setActivated(self, activate, display_nr=0):
+    def setActivated(self, activate):
         if activate:
             self.img.setBorder(pg.mkPen((100, 100, 100), width=3))
             self.addItem(self.identifier_text_item)
@@ -352,10 +367,10 @@ class LatentSpace3DContainer():
     Provides access to 3D items (camera, renderer, actor, mapper...)
     of one comparison case.
     """
-    def __init__(self, surface_file_path, active_field_name, scale_min, scale_max, identifier):
+    def __init__(self, surface_file_path, active_field_name, scale_min, scale_max):
         # id text
         self.identifier_text = vtk.vtkTextActor()
-        self.identifier_text.SetInput(str(identifier))
+        # self.identifier_text.SetInput(str(identifier))
         # self.identifier_text.SetPosition(50, 10)
         p = self.identifier_text.GetTextProperty()
         p.SetColor(0, 0, 0)
