@@ -46,6 +46,8 @@ class FlowCompModule(QWidget):
         self.surface_dataset_paths = [] # TODO integrate into container?
         self.flow_dataset_paths = []
         self.active_map_ids = []
+        self.vessel_translations = {}
+        self.vessel_rotations = {}
         self.active_field_name = 'WSS_systolic'
         self.map_scale_min = {'WSS_systolic':0,   'WSS_diastolic':0,   'longitudinal_WSS_systolic':-50, 'longitudinal_WSS_systolic':-50}
         self.map_scale_max = {'WSS_systolic':300, 'WSS_diastolic':300, 'longitudinal_WSS_systolic':0,   'longitudinal_WSS_systolic':0}
@@ -136,6 +138,9 @@ class FlowCompModule(QWidget):
         self.working_dir = dir
         self.patient_data = patient_data
 
+        # --------------------------------------
+        # Load items that can be displayed
+        # --------------------------------------
         # clear current view
         self.reset()
 
@@ -169,7 +174,23 @@ class FlowCompModule(QWidget):
         self.nr_latent_space_items = min(10, len(self.map_views))
         for i in range(self.nr_latent_space_items):
             self.latent_space_layout.addWidget(self.map_views[i])
-    
+
+        # --------------------------------------
+        # Load translations and rotations
+        # --------------------------------------
+        self.vessel_translations = {}
+        self.vessel_rotations = {}
+        registration_file = os.path.join(self.working_dir, "TransRot.txt")
+        if os.path.exists(registration_file):
+            with open(registration_file) as f:
+                trans_rot = f.read().splitlines()
+            for i in range(0, len(trans_rot), 3):
+                identifier = trans_rot[i]
+                translatation = trans_rot[i+1].split("t ")[1].split()
+                rotation = trans_rot[i+2].split("r ")[1].split()
+                self.vessel_translations[identifier] = [float(item) for item in translatation]
+                self.vessel_rotations[identifier] = [float(item) for item in rotation]
+
 
     def mapClicked(self, id):
         img_box_clicked = self.map_views[id].centralWidget
@@ -180,11 +201,21 @@ class FlowCompModule(QWidget):
             img_box_clicked.setActivated(True)
 
             # create a container for 3D vis of selected map
+            case_identifier = os.path.basename(self.surface_dataset_paths[id])[:-8]
+            try:
+                translation = self.vessel_translations[case_identifier]
+                rotation = self.vessel_rotations[case_identifier]
+            except:
+                print("Warning: No translation/rotation found for", case_identifier)
+                translation = None
+                rotation = None
             container = LatentSpace3DContainer(
                 surface_file_path=self.surface_dataset_paths[id],
                 active_field_name=self.active_field_name,
                 scale_min=self.map_scale_min[self.active_field_name],
-                scale_max=self.map_scale_max[self.active_field_name] # TODO provide current levels
+                scale_max=self.map_scale_max[self.active_field_name], # TODO provide current levels
+                trans=translation,
+                rot=rotation
                 )
             self.comp_patient_containers.append(container)
             self.comp_patient_view.GetRenderWindow().AddRenderer(container.renderer)
@@ -367,7 +398,7 @@ class LatentSpace3DContainer():
     Provides access to 3D items (camera, renderer, actor, mapper...)
     of one comparison case.
     """
-    def __init__(self, surface_file_path, active_field_name, scale_min, scale_max):
+    def __init__(self, surface_file_path, active_field_name, scale_min, scale_max, trans=None, rot=None):
         # id text
         self.identifier_text = vtk.vtkTextActor()
         # self.identifier_text.SetInput(str(identifier))
@@ -386,8 +417,24 @@ class LatentSpace3DContainer():
         reader.Update()
         self.surface = reader.GetOutput()
         self.surface.GetPointData().SetActiveScalars(active_field_name)
+
+        # transform
+        rotation_mat = np.eye(4)
+        rotation_mat[0:3, 0:3] = np.reshape(rot, (3,3), order='F') # matrix is given column-wise
+        translation_mat = np.eye(4)
+        translation_mat[0:3, 3] = np.array(trans)
+        transform_mat = rotation_mat @ translation_mat # translate, then rotate
+        transform_mat = transform_mat.flatten(order='C') # row-wise input for vtk
+
+        transform = vtk.vtkTransform()
+        transform.SetMatrix(transform_mat)
+        transform_filter = vtk.vtkTransformFilter()
+        transform_filter.SetInputData(self.surface)
+        transform_filter.SetTransform(transform)
+
+        # surface mapper/actor
         self.mapper = vtk.vtkDataSetMapper()
-        self.mapper.SetInputData(self.surface)
+        self.mapper.SetInputConnection(transform_filter.GetOutputPort())
         self.mapper.SetScalarRange(scale_min, scale_max)
         self.mapper.SetLookupTable(getLUTviridis(0, 1)) # TODO use current LUT
         self.actor = vtk.vtkActor()
@@ -402,7 +449,7 @@ class LatentSpace3DContainer():
         self.camera.SetViewUp(0, -1, 0)
         self.renderer.AddActor(self.actor)
         self.renderer.AddActor(self.identifier_text)
-        self.renderer.ResetCamera()
+        # self.renderer.ResetCamera()
     
     def setIdText(self, identifier):
         self.identifier_text.SetInput(str(identifier))
