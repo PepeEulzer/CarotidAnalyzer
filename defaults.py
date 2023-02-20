@@ -24,3 +24,4 @@ SHOW_MODEL_MISMATCH_WARNING = False
 
 # global parameter constants
 MIN_CLUSTER_SIZE = 20000 # minimal cluster size (voxels) computed by automatic segmentation
+INITIAL_NR_MAPS = 10 # initial number of latent space maps to show on the FlowCompModule

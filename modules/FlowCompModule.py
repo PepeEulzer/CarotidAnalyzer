@@ -4,7 +4,7 @@ import numpy as np
 import pyqtgraph as pg
 
 from glob import glob
-from PyQt5.QtWidgets import QWidget, QGridLayout, QHBoxLayout, QVBoxLayout, QLabel, QSplitter, QComboBox
+from PyQt5.QtWidgets import QWidget, QGridLayout, QHBoxLayout, QVBoxLayout, QLabel, QSplitter, QComboBox, QCheckBox
 from PyQt5.QtCore import Qt, pyqtSignal
 from PyQt5 import QtCore, QtGui
 from vtk.qt.QVTKRenderWindowInteractor import QVTKRenderWindowInteractor
@@ -43,6 +43,7 @@ class FlowCompModule(QWidget):
         # latent space data
         self.map_datasets = []
         self.map_views = []
+        self.comp_patient_containers = []
         self.surface_dataset_paths = [] # TODO integrate into container?
         self.flow_dataset_paths = []
         self.active_map_ids = []
@@ -51,7 +52,7 @@ class FlowCompModule(QWidget):
         self.active_field_name = 'WSS_systolic'
         self.map_scale_min = {'WSS_systolic':0,   'WSS_diastolic':0,   'longitudinal_WSS_systolic':-50, 'longitudinal_WSS_systolic':-50}
         self.map_scale_max = {'WSS_systolic':300, 'WSS_diastolic':300, 'longitudinal_WSS_systolic':0,   'longitudinal_WSS_systolic':0}
-        self.nr_latent_space_items = 10 # initial number of displayed maps
+        self.nr_latent_space_items = INITIAL_NR_MAPS # initial number of displayed maps
 
         # toolbar layout
         self.side_combobox = QComboBox()
@@ -63,8 +64,11 @@ class FlowCompModule(QWidget):
         # TODO set view flow
         # TODO set timestep
         # TODO set global plaque visibility
+        self.link_cam_checkbox = QCheckBox("Link cameras")
+        self.link_cam_checkbox.stateChanged[int].connect(self.linkCameras)
         self.toolbar_layout = QHBoxLayout()
         self.toolbar_layout.addWidget(self.side_combobox)
+        self.toolbar_layout.addWidget(self.link_cam_checkbox)
 
         # active patient model view
         style = vtk.vtkInteractorStyleTrackballCamera()
@@ -81,10 +85,20 @@ class FlowCompModule(QWidget):
         # active patient vtk pipelines
         self.active_patient_reader_lumen = vtk.vtkSTLReader()
         self.active_patient_reader_plaque = vtk.vtkSTLReader()
+
+        self.active_patient_transform = vtk.vtkTransform()
+        self.transform_filter_lumen = vtk.vtkTransformFilter()
+        self.transform_filter_lumen.SetInputConnection(self.active_patient_reader_lumen.GetOutputPort())
+        self.transform_filter_lumen.SetTransform(self.active_patient_transform)
+        self.transform_filter_plaque = vtk.vtkTransformFilter()
+        self.transform_filter_plaque.SetInputConnection(self.active_patient_reader_plaque.GetOutputPort())
+        self.transform_filter_plaque.SetTransform(self.active_patient_transform)
+
         self.active_patient_mapper_lumen = vtk.vtkPolyDataMapper()
         self.active_patient_mapper_plaque = vtk.vtkPolyDataMapper()
-        self.active_patient_mapper_lumen.SetInputConnection(self.active_patient_reader_lumen.GetOutputPort())
-        self.active_patient_mapper_plaque.SetInputConnection(self.active_patient_reader_plaque.GetOutputPort())
+        self.active_patient_mapper_lumen.SetInputConnection(self.transform_filter_lumen.GetOutputPort())
+        self.active_patient_mapper_plaque.SetInputConnection(self.transform_filter_plaque.GetOutputPort())
+
         self.active_patient_actor_lumen = vtk.vtkActor()
         self.active_patient_actor_plaque = vtk.vtkActor()
         self.active_patient_actor_lumen.SetMapper(self.active_patient_mapper_lumen)
@@ -96,7 +110,6 @@ class FlowCompModule(QWidget):
         style = vtk.vtkInteractorStyleTrackballCamera()
         self.comp_patient_view = QVTKRenderWindowInteractor()
         self.comp_patient_view.SetInteractorStyle(style)
-        self.comp_patient_containers = []
         self.background_renderer = vtk.vtkRenderer()
         self.background_renderer.SetBackground(1,1,1)
         self.comp_patient_view.GetRenderWindow().AddRenderer(self.background_renderer)
@@ -171,7 +184,7 @@ class FlowCompModule(QWidget):
             self.map_views.append(view)
 
         # initial latent space view, unsorted
-        self.nr_latent_space_items = min(10, len(self.map_views))
+        self.nr_latent_space_items = min(INITIAL_NR_MAPS, len(self.map_views))
         for i in range(self.nr_latent_space_items):
             self.latent_space_layout.addWidget(self.map_views[i])
 
@@ -205,6 +218,7 @@ class FlowCompModule(QWidget):
             try:
                 translation = self.vessel_translations[case_identifier]
                 rotation = self.vessel_rotations[case_identifier]
+                print("Loading surface and transforms for", case_identifier)
             except:
                 print("Warning: No translation/rotation found for", case_identifier)
                 translation = None
@@ -217,6 +231,8 @@ class FlowCompModule(QWidget):
                 trans=translation,
                 rot=rotation
                 )
+            if self.link_cam_checkbox.isChecked():
+                container.useLinkedCamera(self.active_patient_camera)
             self.comp_patient_containers.append(container)
             self.comp_patient_view.GetRenderWindow().AddRenderer(container.renderer)
         
@@ -254,31 +270,65 @@ class FlowCompModule(QWidget):
     def loadPatient(self, patient_dict):
         self.active_patient_dict = patient_dict
         patient_id = self.active_patient_dict['patient_ID']
+
+        # load the models
         if self.side_combobox.currentText() == "Left":
+            case_identifier = patient_id + "_left"
             lumen_path = self.active_patient_dict['lumen_model_left']
             plaque_path = self.active_patient_dict['plaque_model_left']
         else:
+            case_identifier = patient_id + "_right"
             lumen_path = self.active_patient_dict['lumen_model_right']
             plaque_path = self.active_patient_dict['plaque_model_right']
 
-        if lumen_path != None:
+        if lumen_path:
             self.active_patient_reader_lumen.SetFileName(lumen_path)
             self.active_patient_reader_lumen.Update()
             self.active_patient_renderer.AddActor(self.active_patient_actor_lumen)
         else:
             self.active_patient_renderer.RemoveActor(self.active_patient_actor_lumen)
         
-        if plaque_path != None:
+        if plaque_path:
             self.active_patient_reader_plaque.SetFileName(plaque_path)
             self.active_patient_reader_plaque.Update()
             self.active_patient_renderer.AddActor(self.active_patient_actor_plaque)
         else:
             self.active_patient_renderer.RemoveActor(self.active_patient_actor_plaque)
 
+        # load and apply transform
+        rotation_mat = np.eye(4)
+        translation_mat = np.eye(4)
+        try:
+            trans = self.vessel_translations[case_identifier]
+            rot = self.vessel_rotations[case_identifier]
+            translation_mat[0:3, 3] = np.array(trans)
+            rotation_mat[0:3, 0:3] = np.reshape(rot, (3,3), order='F') # matrix is given column-wise
+        except:
+            print("Warning: No translation/rotation found for", case_identifier)
+        transform_mat = rotation_mat @ translation_mat # translate, then rotate
+        transform_mat = transform_mat.flatten(order='C') # row-wise input for vtk
+        self.active_patient_transform.SetMatrix(transform_mat)
+
+        # reset camera
+        self.active_patient_camera.SetPosition(0, 0, -100)
+        self.active_patient_camera.SetFocalPoint(0, 0, 0)
+        self.active_patient_camera.SetViewUp(0, -1, 0)
+        self.active_patient_renderer.ResetCamera()
+
         # TODO sort latent space
 
         self.active_patient_view.GetRenderWindow().Render()
         
+    
+    def linkCameras(self, link):
+        if link:
+            for container in self.comp_patient_containers:
+                container.useLinkedCamera(self.active_patient_camera)
+        else:
+            for container in self.comp_patient_containers:
+                container.useOwnCamera()
+        self.comp_patient_view.GetRenderWindow().Render()
+
 
     def showEvent(self, event):
         self.active_patient_view.Enable()
@@ -463,7 +513,7 @@ class LatentSpace3DContainer():
     def setColormapRange(self, scale_min, scale_max):
         self.mapper.SetScalarRange(scale_min, scale_max)
 
-    def useSynchedCamera(self, cam):
+    def useLinkedCamera(self, cam):
         self.renderer.SetActiveCamera(cam)
 
     def useOwnCamera(self):
