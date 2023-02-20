@@ -8,8 +8,8 @@ Script to export centerline .obj and radius .txt files for use in clustering.
 Requires VTK >= 8.2 (obj writer).
 """
 
-src_folder = 'C:/Users/Pepe Eulzer/Nextcloud/carotis_data'
-dst_folder = 'C:/Users/Pepe Eulzer/Nextcloud/carotis_data/centerlines_radii'
+src_folder = 'E:/carotis_data_backup02'
+dst_folder = 'C:/Users/Pepe Eulzer/Nextcloud/carotis_data/centerlines_radii_landau'
 
 # iterate patients
 for patient_src_folder in glob(os.path.join(src_folder, "patient*")):
