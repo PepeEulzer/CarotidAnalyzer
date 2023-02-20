@@ -39,6 +39,7 @@ class FlowCompModule(QWidget):
         self.working_dir = ""
         self.patient_data = []
         self.active_patient_dict = {'patient_ID':None}
+        self.polling_counter = 0 # for cross-renderwindow camera synchronisation (every 10 frames)
 
         # latent space data
         self.map_datasets = []
@@ -80,6 +81,7 @@ class FlowCompModule(QWidget):
         self.active_patient_camera.SetPosition(0, 0, -100)
         self.active_patient_camera.SetFocalPoint(0, 0, 0)
         self.active_patient_camera.SetViewUp(0, -1, 0)
+        self.active_patient_camera.AddObserver("ModifiedEvent", self.linkedCameraModified)
         self.active_patient_view.GetRenderWindow().AddRenderer(self.active_patient_renderer)
 
         # active patient vtk pipelines
@@ -329,6 +331,14 @@ class FlowCompModule(QWidget):
                 container.useOwnCamera()
         self.comp_patient_view.GetRenderWindow().Render()
 
+    
+    def linkedCameraModified(self, obj, ev):
+        self.polling_counter += 1
+        if self.polling_counter > 10 and self.link_cam_checkbox.isChecked():
+            self.polling_counter = 0
+            self.comp_patient_view.GetRenderWindow().Render()
+            self.active_patient_view.GetRenderWindow().Render()
+
 
     def showEvent(self, event):
         self.active_patient_view.Enable()
@@ -499,7 +509,7 @@ class LatentSpace3DContainer():
         self.camera.SetViewUp(0, -1, 0)
         self.renderer.AddActor(self.actor)
         self.renderer.AddActor(self.identifier_text)
-        # self.renderer.ResetCamera()
+        self.renderer.ResetCamera()
     
     def setIdText(self, identifier):
         self.identifier_text.SetInput(str(identifier))
@@ -517,4 +527,9 @@ class LatentSpace3DContainer():
         self.renderer.SetActiveCamera(cam)
 
     def useOwnCamera(self):
+        # keep current view
+        c = self.renderer.GetActiveCamera()
+        self.camera.SetPosition(c.GetPosition())
+        self.camera.SetFocalPoint(c.GetFocalPoint())
+        self.camera.SetViewUp(c.GetViewUp())
         self.renderer.SetActiveCamera(self.camera)
