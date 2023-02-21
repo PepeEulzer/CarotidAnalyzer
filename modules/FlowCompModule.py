@@ -4,7 +4,7 @@ import numpy as np
 import pyqtgraph as pg
 
 from glob import glob
-from PyQt5.QtWidgets import QWidget, QGridLayout, QHBoxLayout, QVBoxLayout, QLabel, QSplitter, QComboBox, QCheckBox
+from PyQt5.QtWidgets import QWidget, QGridLayout, QHBoxLayout, QVBoxLayout, QLabel, QSplitter, QComboBox, QCheckBox, QSizePolicy
 from PyQt5.QtCore import Qt, pyqtSignal
 from PyQt5 import QtCore, QtGui
 from vtk.qt.QVTKRenderWindowInteractor import QVTKRenderWindowInteractor
@@ -12,6 +12,8 @@ from vtk.qt.QVTKRenderWindowInteractor import QVTKRenderWindowInteractor
 from defaults import *
 
 MAP_FIELD_NAMES = ['WSS_systolic', 'WSS_diastolic', 'longitudinal_WSS_systolic', 'longitudinal_WSS_diastolic']
+COLORMAP_NAMES = ['Virids', 'Cividis', 'Plasma', 'Blues']
+COLORMAP_KEYS = ['viridis', 'cividis', 'plasma', 'CET-L12']
 
 # TODO move from global namespace
 ctf_viridis = vtk.vtkColorTransferFunction()
@@ -50,6 +52,8 @@ class FlowCompModule(QWidget):
         self.active_map_ids = []
         self.vessel_translations = {}
         self.vessel_rotations = {}
+        self.vessel_translations_internal = {}
+        self.vessel_rotations_internal = {}
         self.active_field_name = 'WSS_systolic'
         self.map_scale_min = {'WSS_systolic':0,   'WSS_diastolic':0,   'longitudinal_WSS_systolic':-50, 'longitudinal_WSS_diastolic':-50}
         self.map_scale_max = {'WSS_systolic':300, 'WSS_diastolic':300, 'longitudinal_WSS_systolic':0,   'longitudinal_WSS_diastolic':0}
@@ -63,26 +67,53 @@ class FlowCompModule(QWidget):
         self.side_combobox.addItem("Left")
         self.side_combobox.addItem("Right")
         self.side_combobox.currentTextChanged[str].connect(lambda: self.loadPatient(self.active_patient_dict))
-        # set the active scalar field
+        
+        # set active scalar field
         self.scalar_field_combobox = QComboBox()
         self.scalar_field_combobox.addItems(MAP_FIELD_NAMES)
         self.scalar_field_combobox.currentIndexChanged[int].connect(self.setScalarField)
-        # TODO set active colormap + range
+        
+        # set active colormap + range
+        self.cmap = pg.colormap.get('viridis')
+        self.colormap_combobox = QComboBox()
+        self.colormap_combobox.addItems(COLORMAP_NAMES)
+        self.colormap_combobox.currentIndexChanged[int].connect(self.setColorMap)
+        self.color_bar = pg.ColorBarItem(
+            colorMap=self.cmap,
+            values=(self.map_scale_min[self.active_field_name], self.map_scale_max[self.active_field_name]),
+            width=15,
+            interactive=False,
+            rounding=1,
+            orientation='horizontal'
+        )
+        graphics_view = pg.GraphicsView()
+        graphics_view.setBackground(None)
+        graphics_view.setCentralWidget(self.color_bar)
+        graphics_view.setMinimumSize(100, 36)
+        graphics_view.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Maximum)
+        
         # TODO set view flow
         # TODO set timestep
         # TODO set global plaque visibility
         self.link_cam_checkbox = QCheckBox("Link cameras")
         self.link_cam_checkbox.stateChanged[int].connect(self.linkCameras)
+        
         # add all to toolbar
         self.toolbar_layout = QHBoxLayout()
         self.toolbar_layout.addWidget(QLabel("Side:"))
         self.toolbar_layout.addWidget(self.side_combobox)
         self.toolbar_layout.addWidget(VerticalLine())
+        self.toolbar_layout.addWidget(QLabel("Colormap:"))
+        self.toolbar_layout.addWidget(self.colormap_combobox)
         self.toolbar_layout.addWidget(QLabel("Active scalar field:"))
         self.toolbar_layout.addWidget(self.scalar_field_combobox)
+        self.toolbar_layout.addWidget(graphics_view)
         self.toolbar_layout.addStretch(1)
         self.toolbar_layout.addWidget(self.link_cam_checkbox)
 
+        # -------------------------------------
+        # 3D views
+        # -------------------------------------
         # active patient model view
         style = vtk.vtkInteractorStyleTrackballCamera()
         self.active_patient_view = QVTKRenderWindowInteractor()
@@ -133,6 +164,9 @@ class FlowCompModule(QWidget):
         self.splitter_3D.addWidget(self.active_patient_view)
         self.splitter_3D.addWidget(self.comp_patient_view)
 
+        # -------------------------------------
+        # 2D view
+        # -------------------------------------
         # latent space view, displays the maps
         self.latent_space_widget = ScrollableGraphicsLayoutWidget()
         self.latent_space_widget.scrolled_in.connect(self.decreaseMaps)
@@ -180,12 +214,11 @@ class FlowCompModule(QWidget):
 
         # create all map widgets with the currently active image
         levels = (self.map_scale_min[self.active_field_name], self.map_scale_max[self.active_field_name])
-        colormap = pg.colormap.get('viridis') # TODO use active colormap
         self.map_views = []
         for id, map_dataset in enumerate(self.map_datasets):
             # create view of map as an image item
             img_data = map_dataset[self.active_field_name]
-            map_view = LatentSpaceItem(id, img_data, levels, colormap)
+            map_view = LatentSpaceItem(id, img_data, levels, self.cmap)
             map_view.clicked[int].connect(self.mapClicked)
             self.map_views.append(map_view)
 
@@ -197,6 +230,7 @@ class FlowCompModule(QWidget):
         # --------------------------------------
         # Load translations and rotations
         # --------------------------------------
+        # flow database
         self.vessel_translations = {}
         self.vessel_rotations = {}
         registration_file = os.path.join(self.working_dir, "TransRot.txt")
@@ -209,6 +243,20 @@ class FlowCompModule(QWidget):
                 rotation = trans_rot[i+2].split("r ")[1].split()
                 self.vessel_translations[identifier] = [float(item) for item in translatation]
                 self.vessel_rotations[identifier] = [float(item) for item in rotation]
+
+        # new patients
+        self.vessel_translations_internal = {}
+        self.vessel_rotations_internal = {}
+        registration_file = os.path.join(self.working_dir, "TransRot_internal.txt")
+        if os.path.exists(registration_file):
+            with open(registration_file) as f:
+                trans_rot = f.read().splitlines()
+            for i in range(0, len(trans_rot), 3):
+                identifier = trans_rot[i]
+                translatation = trans_rot[i+1].split("t ")[1].split()
+                rotation = trans_rot[i+2].split("r ")[1].split()
+                self.vessel_translations_internal[identifier] = [float(item) for item in translatation]
+                self.vessel_rotations_internal[identifier] = [float(item) for item in rotation]
 
 
     def increaseMaps(self):
@@ -321,8 +369,8 @@ class FlowCompModule(QWidget):
         rotation_mat = np.eye(4)
         translation_mat = np.eye(4)
         try:
-            trans = self.vessel_translations[case_identifier]
-            rot = self.vessel_rotations[case_identifier]
+            trans = self.vessel_translations_internal[case_identifier]
+            rot = self.vessel_rotations_internal[case_identifier]
             translation_mat[0:3, 3] = np.array(trans)
             rotation_mat[0:3, 0:3] = np.reshape(rot, (3,3), order='F') # matrix is given column-wise
         except:
@@ -357,6 +405,13 @@ class FlowCompModule(QWidget):
             img = self.map_views[i].img
             img.setImage(self.map_datasets[i][self.active_field_name])
             img.setLevels(levels)
+
+    
+    def setColorMap(self, index):
+        self.cmap = pg.colormap.get(COLORMAP_KEYS[index])
+        self.color_bar.setColorMap(self.cmap)
+        for map_view in self.map_views:
+            map_view.img.setColorMap(self.cmap)
         
     
     def linkCameras(self, link):
@@ -582,6 +637,8 @@ class LatentSpace3DContainer():
         self.camera.SetFocalPoint(c.GetFocalPoint())
         self.camera.SetViewUp(c.GetViewUp())
         self.renderer.SetActiveCamera(self.camera)
+
+
 
 from PyQt5.QtWidgets import QFrame
 class VerticalLine(QFrame):
