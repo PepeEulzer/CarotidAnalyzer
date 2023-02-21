@@ -51,24 +51,36 @@ class FlowCompModule(QWidget):
         self.vessel_translations = {}
         self.vessel_rotations = {}
         self.active_field_name = 'WSS_systolic'
-        self.map_scale_min = {'WSS_systolic':0,   'WSS_diastolic':0,   'longitudinal_WSS_systolic':-50, 'longitudinal_WSS_systolic':-50}
-        self.map_scale_max = {'WSS_systolic':300, 'WSS_diastolic':300, 'longitudinal_WSS_systolic':0,   'longitudinal_WSS_systolic':0}
-        self.nr_latent_space_items = INITIAL_NR_MAPS # initial number of displayed maps
+        self.map_scale_min = {'WSS_systolic':0,   'WSS_diastolic':0,   'longitudinal_WSS_systolic':-50, 'longitudinal_WSS_diastolic':-50}
+        self.map_scale_max = {'WSS_systolic':300, 'WSS_diastolic':300, 'longitudinal_WSS_systolic':0,   'longitudinal_WSS_diastolic':0}
+        self.nr_latent_space_items = INITIAL_NR_MAPS
 
+        # -------------------------------------
         # toolbar layout
+        # -------------------------------------
+        # set left / right side
         self.side_combobox = QComboBox()
         self.side_combobox.addItem("Left")
         self.side_combobox.addItem("Right")
         self.side_combobox.currentTextChanged[str].connect(lambda: self.loadPatient(self.active_patient_dict))
-        # TODO set active scalar field
+        # set the active scalar field
+        self.scalar_field_combobox = QComboBox()
+        self.scalar_field_combobox.addItems(MAP_FIELD_NAMES)
+        self.scalar_field_combobox.currentIndexChanged[int].connect(self.setScalarField)
         # TODO set active colormap + range
         # TODO set view flow
         # TODO set timestep
         # TODO set global plaque visibility
         self.link_cam_checkbox = QCheckBox("Link cameras")
         self.link_cam_checkbox.stateChanged[int].connect(self.linkCameras)
+        # add all to toolbar
         self.toolbar_layout = QHBoxLayout()
+        self.toolbar_layout.addWidget(QLabel("Side:"))
         self.toolbar_layout.addWidget(self.side_combobox)
+        self.toolbar_layout.addWidget(VerticalLine())
+        self.toolbar_layout.addWidget(QLabel("Active scalar field:"))
+        self.toolbar_layout.addWidget(self.scalar_field_combobox)
+        self.toolbar_layout.addStretch(1)
         self.toolbar_layout.addWidget(self.link_cam_checkbox)
 
         # active patient model view
@@ -278,6 +290,8 @@ class FlowCompModule(QWidget):
     def loadPatient(self, patient_dict):
         self.active_patient_dict = patient_dict
         patient_id = self.active_patient_dict['patient_ID']
+        if patient_id == None:
+            return
 
         # load the models
         if self.side_combobox.currentText() == "Left":
@@ -326,6 +340,23 @@ class FlowCompModule(QWidget):
         # TODO sort latent space
 
         self.active_patient_view.GetRenderWindow().Render()
+
+    
+    def setScalarField(self, index):
+        self.active_field_name = MAP_FIELD_NAMES[index]
+        levels = (self.map_scale_min[self.active_field_name], self.map_scale_max[self.active_field_name])
+
+        # set field on 3D views
+        for container in self.comp_patient_containers:
+            container.setScalars(self.active_field_name)
+            container.mapper.SetScalarRange(levels)
+        self.comp_patient_view.GetRenderWindow().Render()
+        
+        # set field on map views
+        for i in range(len(self.map_datasets)):
+            img = self.map_views[i].img
+            img.setImage(self.map_datasets[i][self.active_field_name])
+            img.setLevels(levels)
         
     
     def linkCameras(self, link):
@@ -484,14 +515,9 @@ class LatentSpace3DContainer():
     def __init__(self, surface_file_path, active_field_name, scale_min, scale_max, trans=None, rot=None):
         # id text
         self.identifier_text = vtk.vtkTextActor()
-        # self.identifier_text.SetInput(str(identifier))
-        # self.identifier_text.SetPosition(50, 10)
         p = self.identifier_text.GetTextProperty()
         p.SetColor(0, 0, 0)
         p.SetFontSize(20)
-        # p.SetJustificationToCentered()
-        # p.FrameOn()
-        # p.SetFrameColor(0, 0, 0)
         p.SetBackgroundColor(1, 1, 1)
 
         # 3D surface object
@@ -556,3 +582,13 @@ class LatentSpace3DContainer():
         self.camera.SetFocalPoint(c.GetFocalPoint())
         self.camera.SetViewUp(c.GetViewUp())
         self.renderer.SetActiveCamera(self.camera)
+
+from PyQt5.QtWidgets import QFrame
+class VerticalLine(QFrame):
+    """
+    A vertical line for use in Qt Layouts.
+    """
+    def __init__(self):
+        super(VerticalLine, self).__init__()
+        self.setFrameShape(QFrame.VLine)
+        self.setFrameShadow(QFrame.Sunken)
