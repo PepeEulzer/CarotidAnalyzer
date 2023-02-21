@@ -121,13 +121,10 @@ class FlowCompModule(QWidget):
         self.splitter_3D.addWidget(self.active_patient_view)
         self.splitter_3D.addWidget(self.comp_patient_view)
 
-        # latent space view
-        # self.latent_space_widget = pg.GraphicsLayoutWidget()
-        self.latent_space_layout = QHBoxLayout()
-        self.latent_space_layout.setContentsMargins(0, 0, 0, 0)
-        self.latent_space_layout.setSpacing(0)
-        self.latent_space_widget = QWidget()
-        self.latent_space_widget.setLayout(self.latent_space_layout)
+        # latent space view, displays the maps
+        self.latent_space_widget = ScrollableGraphicsLayoutWidget()
+        self.latent_space_widget.scrolled_in.connect(self.decreaseMaps)
+        self.latent_space_widget.scrolled_out.connect(self.increaseMaps)
 
         # 3D/latent horizontal splitter
         self.splitter_horizontal = QSplitter(self)
@@ -174,21 +171,16 @@ class FlowCompModule(QWidget):
         colormap = pg.colormap.get('viridis') # TODO use active colormap
         self.map_views = []
         for id, map_dataset in enumerate(self.map_datasets):
-            # create image item
+            # create view of map as an image item
             img_data = map_dataset[self.active_field_name]
-            img_box = LatentSpaceItem(id, img_data, levels, colormap)
-            img_box.clicked[int].connect(self.mapClicked)
-
-            # add to view, required to add to a qt layout
-            # get img_box with view.centralWidget
-            view = pg.GraphicsView()
-            view.setCentralWidget(img_box)
-            self.map_views.append(view)
+            map_view = LatentSpaceItem(id, img_data, levels, colormap)
+            map_view.clicked[int].connect(self.mapClicked)
+            self.map_views.append(map_view)
 
         # initial latent space view, unsorted
         self.nr_latent_space_items = min(INITIAL_NR_MAPS, len(self.map_views))
         for i in range(self.nr_latent_space_items):
-            self.latent_space_layout.addWidget(self.map_views[i])
+            self.latent_space_widget.addItem(self.map_views[i], row=0, col=i)
 
         # --------------------------------------
         # Load translations and rotations
@@ -207,8 +199,22 @@ class FlowCompModule(QWidget):
                 self.vessel_rotations[identifier] = [float(item) for item in rotation]
 
 
+    def increaseMaps(self):
+        if self.nr_latent_space_items < len(self.map_views)-1:
+            map_view = self.map_views[self.nr_latent_space_items]
+            self.latent_space_widget.addItem(map_view, row=0, col=self.nr_latent_space_items)
+            self.nr_latent_space_items += 1
+    
+
+    def decreaseMaps(self):
+        if self.nr_latent_space_items > 1:
+            self.nr_latent_space_items -= 1
+            map_view = self.map_views[self.nr_latent_space_items]
+            self.latent_space_widget.removeItem(map_view)
+
+
     def mapClicked(self, id):
-        img_box_clicked = self.map_views[id].centralWidget
+        img_box_clicked = self.map_views[id]
         id = img_box_clicked.id
         if id not in self.active_map_ids:
             # box is new -> activate
@@ -220,7 +226,7 @@ class FlowCompModule(QWidget):
             try:
                 translation = self.vessel_translations[case_identifier]
                 rotation = self.vessel_rotations[case_identifier]
-                print("Loading surface and transforms for", case_identifier)
+                # print("Loading surface and transforms for", case_identifier)
             except:
                 print("Warning: No translation/rotation found for", case_identifier)
                 translation = None
@@ -257,7 +263,7 @@ class FlowCompModule(QWidget):
             w = 1.0 / nr_cols # single viewport width
         for i in range(nr_maps):
             id = self.active_map_ids[i]
-            self.map_views[id].centralWidget.setIdText(i+1)
+            self.map_views[id].setIdText(i+1)
 
             # update viewports
             row = nr_rows - 1 - int(i / nr_cols) # top -> bottom rows
@@ -357,17 +363,16 @@ class FlowCompModule(QWidget):
         self.active_patient_renderer.RemoveActor(self.active_patient_actor_lumen)
         self.active_patient_renderer.RemoveActor(self.active_patient_actor_plaque)
 
-        # remove map views from latent space navigator but keep map cache
-        for w in self.map_views:
-            self.latent_space_layout.removeWidget(w)
-
         # delete active 3D views of map
         for id in self.active_map_ids:
-            self.map_views[id].centralWidget.setActivated(False)
+            self.map_views[id].setActivated(False)
         self.active_map_ids.clear()
         for c in self.comp_patient_containers:
             self.comp_patient_view.GetRenderWindow().RemoveRenderer(c.renderer)
         self.comp_patient_containers.clear()
+
+        # remove map views from latent space navigator but keep map cache
+        self.latent_space_widget.clear()
 
         # render views
         self.active_patient_view.GetRenderWindow().Render()
@@ -377,6 +382,24 @@ class FlowCompModule(QWidget):
     def close(self):
         self.active_patient_view.Finalize()
         self.comp_patient_view.Finalize()
+
+
+
+class ScrollableGraphicsLayoutWidget(pg.GraphicsLayoutWidget):
+    """
+    A pyqtgraph GraphicsLayoutWidget that emits wheel events.
+    """
+    scrolled_in = pyqtSignal()
+    scrolled_out = pyqtSignal()
+    def wheelEvent(self, ev):
+        if ev.angleDelta().y() < 0:
+            self.scrolled_out.emit()
+            ev.accept()
+        elif ev.angleDelta().y() > 0:
+            self.scrolled_in.emit()
+            ev.accept()
+        else:
+            ev.ignore() 
 
 
 

@@ -451,7 +451,6 @@ class CarotidAnalyzer(QMainWindow, Ui_MainWindow):
                 self.segmentation_module.save()
 
 
-    
     def viewDataInspector(self, on:bool):
         if on:
             self.dock_data_inspector.show()
