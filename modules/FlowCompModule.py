@@ -12,7 +12,12 @@ from vtk.qt.QVTKRenderWindowInteractor import QVTKRenderWindowInteractor
 
 from defaults import *
 
-MAP_FIELD_NAMES = ['WSS_systolic', 'WSS_diastolic', 'longitudinal_WSS_systolic', 'longitudinal_WSS_diastolic']
+MAP_FIELD_NAMES = ['WSS_systolic',
+                   'WSS_diastolic',
+                   'longitudinal_WSS_systolic',
+                   'longitudinal_WSS_diastolic',
+                   'velocity_systolic',
+                   'velocity_diastolic']
 COLORMAP_NAMES = ['Virids', 'Cividis', 'Plasma', 'Blues']
 COLORMAP_KEYS = ['viridis', 'cividis', 'plasma', 'CET-L12']
 
@@ -52,8 +57,18 @@ class FlowCompModule(QWidget):
         self.vessel_translations_internal = {}
         self.vessel_rotations_internal = {}
         self.active_field_name = 'WSS_systolic'
-        self.map_scale_min = {'WSS_systolic':0,   'WSS_diastolic':0,   'longitudinal_WSS_systolic':-50, 'longitudinal_WSS_diastolic':-50}
-        self.map_scale_max = {'WSS_systolic':300, 'WSS_diastolic':300, 'longitudinal_WSS_systolic':0,   'longitudinal_WSS_diastolic':0}
+        self.map_scale_min = {'WSS_systolic':0,
+                              'WSS_diastolic':0,   
+                              'longitudinal_WSS_systolic':-50,
+                              'longitudinal_WSS_diastolic':-50,
+                              'velocity_systolic':0,
+                              'velocity_diastolic':0}
+        self.map_scale_max = {'WSS_systolic':300,
+                              'WSS_diastolic':300,
+                              'longitudinal_WSS_systolic':0,
+                              'longitudinal_WSS_diastolic':0,
+                              'velocity_systolic':3,
+                              'velocity_diastolic':3}
         self.nr_latent_space_items = INITIAL_NR_MAPS
 
         # -------------------------------------
@@ -102,10 +117,10 @@ class FlowCompModule(QWidget):
         self.levels_max_spinbox.setRange(-999, 999)
         self.levels_max_spinbox.setValue(levels[1])
         self.levels_max_spinbox.valueChanged[float].connect(self.setLevelsMax)
-        
-        # TODO set view flow
-        # TODO set timestep
+
         # TODO set global plaque visibility
+        
+        # link/unlink cameras
         self.link_cam_checkbox = QCheckBox("Link cameras")
         self.link_cam_checkbox.stateChanged[int].connect(self.linkCameras)
         
@@ -206,30 +221,6 @@ class FlowCompModule(QWidget):
         self.comp_patient_view.Start()
 
     
-    def getLevels(self):
-        return (self.map_scale_min[self.active_field_name], self.map_scale_max[self.active_field_name])
-
-
-    def setLevelsMin(self, minval):
-        self.map_scale_min[self.active_field_name] = minval
-        self.__updateLevels()
-
-
-    def setLevelsMax(self, maxval):
-        self.map_scale_max[self.active_field_name] = maxval
-        self.__updateLevels()
-
-    
-    def __updateLevels(self):
-        levels = self.getLevels()
-        self.color_bar.setLevels(levels)
-        for map_view in self.map_views:
-            map_view.img.setLevels(levels)
-        for container in self.comp_patient_containers:
-            container.mapper.SetScalarRange(levels)
-        self.comp_patient_view.GetRenderWindow().Render()
-        
-
     def setWorkingDir(self, dir, patient_data):
         self.working_dir = dir
         self.patient_data = patient_data
@@ -263,6 +254,13 @@ class FlowCompModule(QWidget):
         self.nr_latent_space_items = min(INITIAL_NR_MAPS, len(self.map_views))
         for i in range(self.nr_latent_space_items):
             self.latent_space_widget.addItem(self.map_views[i], row=0, col=i)
+
+        # load streamline filepath
+        self.systolic_streamline_paths = {}
+        self.diastolic_streamline_paths = {}
+        systolic_streamline_pattern = os.path.join(self.working_dir, "flow_streamlines", "patient*_systolic.vtp")
+        diastolic_streamline_pattern = os.path.join(self.working_dir, "flow_streamlines", "patient*_diastolic.vtp")
+        
 
         # --------------------------------------
         # Load translations and rotations
@@ -429,24 +427,67 @@ class FlowCompModule(QWidget):
         self.active_patient_view.GetRenderWindow().Render()
 
     
+    def getLevels(self):
+        return (self.map_scale_min[self.active_field_name], self.map_scale_max[self.active_field_name])
+
+
+    def setLevelsMin(self, minval):
+        self.map_scale_min[self.active_field_name] = minval
+        self.__updateLevels()
+
+
+    def setLevelsMax(self, maxval):
+        self.map_scale_max[self.active_field_name] = maxval
+        self.__updateLevels()
+
+    
+    def __updateLevels(self):
+        levels = self.getLevels()
+        self.color_bar.setLevels(levels)
+
+        # update levels on surface if a surface map is displayed
+        if not 'velocity' in self.active_field_name:
+            for map_view in self.map_views:
+                map_view.img.setLevels(levels)
+            for container in self.comp_patient_containers:
+                container.mapper.SetScalarRange(levels)
+            self.comp_patient_view.GetRenderWindow().Render()
+
+    
     def setScalarField(self, index):
         self.active_field_name = MAP_FIELD_NAMES[index]
         levels = self.getLevels()
 
-        # update color bar
-        self.color_bar.setLevels(levels)
+        # update labels, colorbar is automatically updated
+        self.levels_min_spinbox.setValue(levels[0])
+        self.levels_max_spinbox.setValue(levels[1])
 
-        # set field on 3D views
-        for container in self.comp_patient_containers:
-            container.setScalars(self.active_field_name)
-            container.mapper.SetScalarRange(levels)
-        self.comp_patient_view.GetRenderWindow().Render()
+        # velocity field? -> display streamlines
+        if 'velocity' in self.active_field_name:
+            # unicolor maps with lowest color (velocity 0)
+            for container in self.comp_patient_containers:
+                container.mapper.SetScalarRange(10000, 10000)
+            for map_view in self.map_views:
+                map_view.img.setLevels((10000, 10000))
+
+            # display streamlines
+            # TODO
+
+        # surface field? -> display surface
+        else:
+            # set field on 3D views
+            for container in self.comp_patient_containers:
+                container.setScalars(self.active_field_name)
+                container.mapper.SetScalarRange(levels)
+
+            # set field on map views
+            for i in range(len(self.map_datasets)):
+                img = self.map_views[i].img
+                img.setImage(self.map_datasets[i][self.active_field_name])
+                img.setLevels(levels)
         
-        # set field on map views
-        for i in range(len(self.map_datasets)):
-            img = self.map_views[i].img
-            img.setImage(self.map_datasets[i][self.active_field_name])
-            img.setLevels(levels)
+        # update 3D views
+        self.comp_patient_view.GetRenderWindow().Render()
 
     
     def setColorMap(self, index):
@@ -627,6 +668,10 @@ class LatentSpace3DContainer():
         reader.Update()
         self.surface = reader.GetOutput()
         self.surface.GetPointData().SetActiveScalars(active_field_name)
+
+        # streamlines
+        reader = vtk.vtkXMLPolyDataReader()
+        reader.SetFileName()
 
         # transform
         rotation_mat = np.eye(4)
