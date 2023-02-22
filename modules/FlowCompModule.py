@@ -4,7 +4,8 @@ import numpy as np
 import pyqtgraph as pg
 
 from glob import glob
-from PyQt5.QtWidgets import QWidget, QGridLayout, QHBoxLayout, QVBoxLayout, QLabel, QSplitter, QComboBox, QCheckBox, QSizePolicy
+from PyQt5.QtWidgets import (QWidget, QGridLayout, QHBoxLayout, QVBoxLayout, QLabel, QSplitter, 
+    QComboBox, QCheckBox, QSizePolicy, QDoubleSpinBox)
 from PyQt5.QtCore import Qt, pyqtSignal
 from PyQt5 import QtCore, QtGui
 from vtk.qt.QVTKRenderWindowInteractor import QVTKRenderWindowInteractor
@@ -15,22 +16,18 @@ MAP_FIELD_NAMES = ['WSS_systolic', 'WSS_diastolic', 'longitudinal_WSS_systolic',
 COLORMAP_NAMES = ['Virids', 'Cividis', 'Plasma', 'Blues']
 COLORMAP_KEYS = ['viridis', 'cividis', 'plasma', 'CET-L12']
 
-# TODO move from global namespace
-ctf_viridis = vtk.vtkColorTransferFunction()
-ctf_viridis.SetColorSpaceToLab()
-ctf_viridis.AddRGBPoint(1.0, 0.39, 0.2, 0.18)
-ctf_viridis.AddRGBPoint(0.75, 0.51, 0.35, 0.47)
-ctf_viridis.AddRGBPoint(0.5, 0.37, 0.59, 0.7)
-ctf_viridis.AddRGBPoint(0.25, 0.31, 0.81, 0.67)
-ctf_viridis.AddRGBPoint(0.0, 0.81, 0.95, 0.47)
-def getLUTviridis(range_min, range_max):
-    lut = vtk.vtkLookupTable()
-    lut.SetNumberOfTableValues(255)
-    lut.SetTableRange(range_min, range_max)
-    for i in range(255):
-        rgb = ctf_viridis.GetColor(i/255)
-        lut.SetTableValue(i, rgb[0], rgb[1], rgb[2])
-    return lut
+
+def getVTKLookupTable(cmap, nPts=512):
+    # returns a vtkLookupTable from any given pyqtgraph colormap
+    pg_lut = cmap.getLookupTable(nPts=nPts, mode=pg.ColorMap.FLOAT)
+    vtk_lut = vtk.vtkLookupTable()
+    vtk_lut.SetNumberOfTableValues(nPts)
+    vtk_lut.SetTableRange(0, 1) # scaled by mapper
+    for i in range(nPts):
+        vtk_lut.SetTableValue(i, pg_lut[i,0], pg_lut[i,1], pg_lut[i,2])
+    return vtk_lut
+
+
 
 class FlowCompModule(QWidget):
     """
@@ -75,12 +72,20 @@ class FlowCompModule(QWidget):
         
         # set active colormap + range
         self.cmap = pg.colormap.get('viridis')
+        self.vtk_lut = getVTKLookupTable(self.cmap)
         self.colormap_combobox = QComboBox()
         self.colormap_combobox.addItems(COLORMAP_NAMES)
         self.colormap_combobox.currentIndexChanged[int].connect(self.setColorMap)
+        levels = self.getLevels()
+        self.levels_min_spinbox = QDoubleSpinBox()
+        self.levels_min_spinbox.setSingleStep(10)
+        self.levels_min_spinbox.setDecimals(1)
+        self.levels_min_spinbox.setRange(-999, 999)
+        self.levels_min_spinbox.setValue(levels[0])
+        self.levels_min_spinbox.valueChanged[float].connect(self.setLevelsMin)
         self.color_bar = pg.ColorBarItem(
             colorMap=self.cmap,
-            values=(self.map_scale_min[self.active_field_name], self.map_scale_max[self.active_field_name]),
+            values=levels,
             width=15,
             interactive=False,
             rounding=1,
@@ -91,6 +96,12 @@ class FlowCompModule(QWidget):
         graphics_view.setCentralWidget(self.color_bar)
         graphics_view.setMinimumSize(100, 36)
         graphics_view.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Maximum)
+        self.levels_max_spinbox = QDoubleSpinBox()
+        self.levels_max_spinbox.setSingleStep(10)
+        self.levels_max_spinbox.setDecimals(1)
+        self.levels_max_spinbox.setRange(-999, 999)
+        self.levels_max_spinbox.setValue(levels[1])
+        self.levels_max_spinbox.valueChanged[float].connect(self.setLevelsMax)
         
         # TODO set view flow
         # TODO set timestep
@@ -107,7 +118,10 @@ class FlowCompModule(QWidget):
         self.toolbar_layout.addWidget(self.colormap_combobox)
         self.toolbar_layout.addWidget(QLabel("Active scalar field:"))
         self.toolbar_layout.addWidget(self.scalar_field_combobox)
+        self.toolbar_layout.addWidget(self.levels_min_spinbox)
         self.toolbar_layout.addWidget(graphics_view)
+        self.toolbar_layout.addWidget(self.levels_max_spinbox)
+        self.toolbar_layout.addWidget(VerticalLine())
         self.toolbar_layout.addStretch(1)
         self.toolbar_layout.addWidget(self.link_cam_checkbox)
 
@@ -191,6 +205,30 @@ class FlowCompModule(QWidget):
         self.comp_patient_view.Initialize()
         self.comp_patient_view.Start()
 
+    
+    def getLevels(self):
+        return (self.map_scale_min[self.active_field_name], self.map_scale_max[self.active_field_name])
+
+
+    def setLevelsMin(self, minval):
+        self.map_scale_min[self.active_field_name] = minval
+        self.__updateLevels()
+
+
+    def setLevelsMax(self, maxval):
+        self.map_scale_max[self.active_field_name] = maxval
+        self.__updateLevels()
+
+    
+    def __updateLevels(self):
+        levels = self.getLevels()
+        self.color_bar.setLevels(levels)
+        for map_view in self.map_views:
+            map_view.img.setLevels(levels)
+        for container in self.comp_patient_containers:
+            container.mapper.SetScalarRange(levels)
+        self.comp_patient_view.GetRenderWindow().Render()
+        
 
     def setWorkingDir(self, dir, patient_data):
         self.working_dir = dir
@@ -213,12 +251,11 @@ class FlowCompModule(QWidget):
                 self.map_datasets.append(np.load(map_file))
 
         # create all map widgets with the currently active image
-        levels = (self.map_scale_min[self.active_field_name], self.map_scale_max[self.active_field_name])
         self.map_views = []
         for id, map_dataset in enumerate(self.map_datasets):
             # create view of map as an image item
             img_data = map_dataset[self.active_field_name]
-            map_view = LatentSpaceItem(id, img_data, levels, self.cmap)
+            map_view = LatentSpaceItem(id, img_data, self.getLevels(), self.cmap)
             map_view.clicked[int].connect(self.mapClicked)
             self.map_views.append(map_view)
 
@@ -291,11 +328,13 @@ class FlowCompModule(QWidget):
                 print("Warning: No translation/rotation found for", case_identifier)
                 translation = None
                 rotation = None
+            levels = self.getLevels()
             container = LatentSpace3DContainer(
                 surface_file_path=self.surface_dataset_paths[id],
                 active_field_name=self.active_field_name,
-                scale_min=self.map_scale_min[self.active_field_name],
-                scale_max=self.map_scale_max[self.active_field_name], # TODO provide current levels
+                scale_min=levels[0],
+                scale_max=levels[1],
+                lut=self.vtk_lut,
                 trans=translation,
                 rot=rotation
                 )
@@ -392,7 +431,10 @@ class FlowCompModule(QWidget):
     
     def setScalarField(self, index):
         self.active_field_name = MAP_FIELD_NAMES[index]
-        levels = (self.map_scale_min[self.active_field_name], self.map_scale_max[self.active_field_name])
+        levels = self.getLevels()
+
+        # update color bar
+        self.color_bar.setLevels(levels)
 
         # set field on 3D views
         for container in self.comp_patient_containers:
@@ -409,9 +451,13 @@ class FlowCompModule(QWidget):
     
     def setColorMap(self, index):
         self.cmap = pg.colormap.get(COLORMAP_KEYS[index])
+        self.vtk_lut = getVTKLookupTable(self.cmap)
         self.color_bar.setColorMap(self.cmap)
         for map_view in self.map_views:
             map_view.img.setColorMap(self.cmap)
+        for container in self.comp_patient_containers:
+            container.mapper.SetLookupTable(self.vtk_lut)
+        self.comp_patient_view.GetRenderWindow().Render()
         
     
     def linkCameras(self, link):
@@ -567,7 +613,7 @@ class LatentSpace3DContainer():
     Provides access to 3D items (camera, renderer, actor, mapper...)
     of one comparison case.
     """
-    def __init__(self, surface_file_path, active_field_name, scale_min, scale_max, trans=None, rot=None):
+    def __init__(self, surface_file_path, active_field_name, scale_min, scale_max, lut, trans=None, rot=None):
         # id text
         self.identifier_text = vtk.vtkTextActor()
         p = self.identifier_text.GetTextProperty()
@@ -600,7 +646,7 @@ class LatentSpace3DContainer():
         self.mapper = vtk.vtkDataSetMapper()
         self.mapper.SetInputConnection(transform_filter.GetOutputPort())
         self.mapper.SetScalarRange(scale_min, scale_max)
-        self.mapper.SetLookupTable(getLUTviridis(0, 1)) # TODO use current LUT
+        self.mapper.SetLookupTable(lut)
         self.actor = vtk.vtkActor()
         self.actor.SetMapper(self.mapper)
 
@@ -620,9 +666,6 @@ class LatentSpace3DContainer():
     
     def setScalars(self, field_name):
         self.surface.GetPointData().SetActiveScalars(field_name)
-
-    def setColormap(self, LUT):
-        self.mapper.SetLookupTable(getLUTviridis(0, 1)) # TODO use current LUT
 
     def setColormapRange(self, scale_min, scale_max):
         self.mapper.SetScalarRange(scale_min, scale_max)
