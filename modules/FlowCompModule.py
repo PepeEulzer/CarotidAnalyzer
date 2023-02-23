@@ -40,22 +40,30 @@ class FlowCompModule(QWidget):
     """
     def __init__(self, parent=None):
         super().__init__(parent)
+        # active state variables
         self.working_dir = ""
         self.patient_data = []
         self.active_patient_dict = {'patient_ID':None}
         self.polling_counter = 0 # for cross-renderwindow camera synchronisation (every 10 frames)
 
         # latent space data
-        self.map_datasets = []
-        self.map_views = []
-        self.comp_patient_containers = []
-        self.surface_dataset_paths = [] # TODO integrate into container?
-        self.flow_dataset_paths = []
-        self.active_map_ids = []
+        self.map_datasets = []               # np dict of every map in flow folder (wss_map_images.npz)
+        self.map_views = []                  # LatentSpaceItem (pg.ViewBox) of every map in flow folder with active scalar data
+        self.surface_dataset_paths = []      # paths to all surface files in flow folder (wss.vtu)
+        self.systolic_streamline_paths = []  # paths to all systolic streamlines (systolic.vtp)
+        self.diastolic_streamline_paths = [] # paths to all diastolic streamlines (diastolic.vtp)
+
+        self.active_map_ids = []             # indices into above lists, indicate active (clicked) cases
+        self.comp_patient_containers = []    # LatentSpace3DContainer of all active 3D views
+        self.nr_latent_space_items = INITIAL_NR_MAPS
+
+        # translation and rotation dicts for cases, key is the patient id (+ left/right)
         self.vessel_translations = {}
         self.vessel_rotations = {}
         self.vessel_translations_internal = {}
         self.vessel_rotations_internal = {}
+
+        # possible scalar fields, will be mapped to surface or streamlines with active colormap
         self.active_field_name = 'WSS_systolic'
         self.map_scale_min = {'WSS_systolic':0,
                               'WSS_diastolic':0,   
@@ -69,7 +77,6 @@ class FlowCompModule(QWidget):
                               'longitudinal_WSS_diastolic':0,
                               'velocity_systolic':3,
                               'velocity_diastolic':3}
-        self.nr_latent_space_items = INITIAL_NR_MAPS
 
         # -------------------------------------
         # toolbar layout
@@ -234,12 +241,31 @@ class FlowCompModule(QWidget):
         # load latent space cases
         self.map_datasets.clear()
         self.surface_dataset_paths.clear()
+        self.systolic_streamline_paths.clear()
+        self.diastolic_streamline_paths.clear()
         surface_file_pattern = os.path.join(self.working_dir, "flow_wall_data", "patient*_wss.vtu")
-        for filename in glob(surface_file_pattern):
-            map_file = filename[:-4] + "_map_images.npz"
+        for surface_file in glob(surface_file_pattern):
+            # if map and surface file exist -> create a case
+            map_file = surface_file[:-4] + "_map_images.npz"
             if os.path.exists(map_file):
-                self.surface_dataset_paths.append(filename)
+                self.surface_dataset_paths.append(surface_file)
                 self.map_datasets.append(np.load(map_file))
+            else:
+                continue
+            
+            # load systolic streamlines if they exist
+            systolic_streamline_file = surface_file[:-7] + "velocity_systolic.vtp"
+            if os.path.exists(systolic_streamline_file):
+                self.systolic_streamline_paths.append(systolic_streamline_file)
+            else:
+                self.systolic_streamline_paths.append(None)
+
+            # load diastolic streamlines if they exist
+            diastolic_streamline_file = surface_file[:-7] + "velocity_diastolic.vtp"
+            if os.path.exists(diastolic_streamline_file):
+                self.diastolic_streamline_paths.append(diastolic_streamline_file)
+            else:
+                self.diastolic_streamline_paths.append(None)
 
         # create all map widgets with the currently active image
         self.map_views = []
@@ -256,10 +282,6 @@ class FlowCompModule(QWidget):
             self.latent_space_widget.addItem(self.map_views[i], row=0, col=i)
 
         # load streamline filepath
-        self.systolic_streamline_paths = {}
-        self.diastolic_streamline_paths = {}
-        systolic_streamline_pattern = os.path.join(self.working_dir, "flow_streamlines", "patient*_systolic.vtp")
-        diastolic_streamline_pattern = os.path.join(self.working_dir, "flow_streamlines", "patient*_diastolic.vtp")
         
 
         # --------------------------------------
@@ -333,6 +355,8 @@ class FlowCompModule(QWidget):
                 scale_min=levels[0],
                 scale_max=levels[1],
                 lut=self.vtk_lut,
+                stream_sys_path=self.systolic_streamline_paths[id],
+                stream_dia_path=self.diastolic_streamline_paths[id],
                 trans=translation,
                 rot=rotation
                 )
@@ -466,7 +490,7 @@ class FlowCompModule(QWidget):
         if 'velocity' in self.active_field_name:
             # unicolor maps with lowest color (velocity 0)
             for container in self.comp_patient_containers:
-                container.mapper.SetScalarRange(10000, 10000)
+                container.surface_mapper.SetScalarRange(10000, 10000)
             for map_view in self.map_views:
                 map_view.img.setLevels((10000, 10000))
 
@@ -478,7 +502,7 @@ class FlowCompModule(QWidget):
             # set field on 3D views
             for container in self.comp_patient_containers:
                 container.setScalars(self.active_field_name)
-                container.mapper.SetScalarRange(levels)
+                container.surface_mapper.SetScalarRange(levels)
 
             # set field on map views
             for i in range(len(self.map_datasets)):
@@ -654,7 +678,8 @@ class LatentSpace3DContainer():
     Provides access to 3D items (camera, renderer, actor, mapper...)
     of one comparison case.
     """
-    def __init__(self, surface_file_path, active_field_name, scale_min, scale_max, lut, trans=None, rot=None):
+    def __init__(self, surface_file_path, active_field_name, scale_min, scale_max, lut, 
+                 stream_sys_path=None, stream_dia_path=None, trans=None, rot=None):
         # id text
         self.identifier_text = vtk.vtkTextActor()
         p = self.identifier_text.GetTextProperty()
@@ -662,47 +687,72 @@ class LatentSpace3DContainer():
         p.SetFontSize(20)
         p.SetBackgroundColor(1, 1, 1)
 
-        # 3D surface object
+        # create transform for 3D objects
+        rotation_mat = np.eye(4)
+        if rot is not None:
+            rotation_mat[0:3, 0:3] = np.reshape(rot, (3,3), order='F') # matrix is given column-wise
+        translation_mat = np.eye(4)
+        if trans is not None:
+            translation_mat[0:3, 3] = np.array(trans)
+        transform_mat = rotation_mat @ translation_mat # translate, then rotate
+        transform_mat = transform_mat.flatten(order='C') # row-wise input for vtk
+        transform = vtk.vtkTransform()
+        transform.SetMatrix(transform_mat)
+
+        # surface
         reader = vtk.vtkXMLUnstructuredGridReader()
         reader.SetFileName(surface_file_path)
         reader.Update()
         self.surface = reader.GetOutput()
         self.surface.GetPointData().SetActiveScalars(active_field_name)
-
-        # streamlines
-        reader = vtk.vtkXMLPolyDataReader()
-        reader.SetFileName()
-
-        # transform
-        rotation_mat = np.eye(4)
-        rotation_mat[0:3, 0:3] = np.reshape(rot, (3,3), order='F') # matrix is given column-wise
-        translation_mat = np.eye(4)
-        translation_mat[0:3, 3] = np.array(trans)
-        transform_mat = rotation_mat @ translation_mat # translate, then rotate
-        transform_mat = transform_mat.flatten(order='C') # row-wise input for vtk
-
-        transform = vtk.vtkTransform()
-        transform.SetMatrix(transform_mat)
         transform_filter = vtk.vtkTransformFilter()
         transform_filter.SetInputData(self.surface)
         transform_filter.SetTransform(transform)
+        self.surface_mapper = vtk.vtkDataSetMapper()
+        self.surface_mapper.SetInputConnection(transform_filter.GetOutputPort())
+        self.surface_mapper.SetScalarRange(scale_min, scale_max)
+        self.surface_mapper.SetLookupTable(lut)
+        self.surface_actor = vtk.vtkActor()
+        self.surface_actor.SetMapper(self.surface_mapper)
+        
+        # streamlines
+        reader = vtk.vtkXMLPolyDataReader()
+        if stream_sys_path is not None:
+            reader.SetFileName(stream_sys_path)
+            reader.Update()
+            self.streamlines_systolic = reader.GetOutput()
+            print(self.streamlines_systolic)
+            # self.streamlines_systolic.GetPointData().SetActiveScalars(active_field_name)
+        else:
+            self.streamlines_systolic = vtk.vtkPolyData()
 
-        # surface mapper/actor
-        self.mapper = vtk.vtkDataSetMapper()
-        self.mapper.SetInputConnection(transform_filter.GetOutputPort())
-        self.mapper.SetScalarRange(scale_min, scale_max)
-        self.mapper.SetLookupTable(lut)
-        self.actor = vtk.vtkActor()
-        self.actor.SetMapper(self.mapper)
+        if stream_dia_path is not None:
+            reader.SetFileName(stream_dia_path)
+            reader.Update()
+            self.streamlines_diastolic = reader.GetOutput()
+        else:
+            self.streamlines_diastolic = vtk.vtkPolyData()
+            self.streamlines_diastolic.GetPointData().SetActiveScalars(active_field_name)
+
+        self.streamlines_transform_filter = vtk.vtkTransformFilter()
+        self.streamlines_transform_filter.SetInputData(self.streamlines_systolic)
+        self.streamlines_transform_filter.SetTransform(transform)
+        self.streamlines_mapper = vtk.vtkDataSetMapper()
+        self.streamlines_mapper.SetInputConnection(self.streamlines_transform_filter.GetOutputPort())
+        self.streamlines_mapper.SetScalarRange(scale_min, scale_max)
+        self.streamlines_mapper.SetLookupTable(lut)
+        self.streamlines_actor = vtk.vtkActor()
+        self.streamlines_actor.SetMapper(self.streamlines_mapper)
 
         # create a renderer, save own camera (viewports will be set later)
         self.renderer = vtk.vtkRenderer()
         self.renderer.SetBackground(1, 1, 1)
+        self.renderer.SetBackground(0, 0, 0)
         self.camera = self.renderer.GetActiveCamera()
         self.camera.SetPosition(0, 0, -100)
         self.camera.SetFocalPoint(0, 0, 0)
         self.camera.SetViewUp(0, -1, 0)
-        self.renderer.AddActor(self.actor)
+        self.renderer.AddActor(self.streamlines_actor) # TODO display dependent on state
         self.renderer.AddActor(self.identifier_text)
         self.renderer.ResetCamera()
     
@@ -711,6 +761,8 @@ class LatentSpace3DContainer():
     
     def setScalars(self, field_name):
         self.surface.GetPointData().SetActiveScalars(field_name)
+        self.streamlines_systolic.GetPointData().SetActiveScalars(field_name)
+        self.streamlines_diastolic.GetPointData().SetActiveScalars(field_name)
 
     def setColormapRange(self, scale_min, scale_max):
         self.mapper.SetScalarRange(scale_min, scale_max)
