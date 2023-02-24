@@ -5,7 +5,7 @@ import pyqtgraph as pg
 
 from glob import glob
 from PyQt5.QtWidgets import (QWidget, QGridLayout, QHBoxLayout, QVBoxLayout, QLabel, QSplitter, 
-    QComboBox, QCheckBox, QSizePolicy, QDoubleSpinBox)
+    QComboBox, QCheckBox, QSizePolicy, QDoubleSpinBox, QPushButton)
 from PyQt5.QtCore import Qt, pyqtSignal
 from PyQt5 import QtCore, QtGui
 from vtk.qt.QVTKRenderWindowInteractor import QVTKRenderWindowInteractor
@@ -18,8 +18,16 @@ MAP_FIELD_NAMES = ['WSS_systolic',
                    'longitudinal_WSS_diastolic',
                    'velocity_systolic',
                    'velocity_diastolic']
-COLORMAP_NAMES = ['Virids', 'Cividis', 'Plasma', 'Blues']
-COLORMAP_KEYS = ['viridis', 'cividis', 'plasma', 'CET-L12']
+
+MAP_DISPLAY_NAMES = ['Systolic WSS',
+                   'Diastolic WSS',
+                   'Systolic Backflow (reverse WSS)',
+                   'Diastolic Backflow (reverse WSS)',
+                   'Systolic Velocity',
+                   'Diastolic Velocity']
+
+COLORMAP_NAMES = ['Viridis', 'Cividis', 'Plasma', 'Blues']
+COLORMAP_KEYS =  ['viridis', 'cividis', 'plasma', 'CET-L12']
 
 
 def getVTKLookupTable(cmap, nPts=512):
@@ -89,7 +97,7 @@ class FlowCompModule(QWidget):
         
         # set active scalar field
         self.scalar_field_combobox = QComboBox()
-        self.scalar_field_combobox.addItems(MAP_FIELD_NAMES)
+        self.scalar_field_combobox.addItems(MAP_DISPLAY_NAMES)
         self.scalar_field_combobox.currentIndexChanged[int].connect(self.setScalarField)
         
         # set active colormap + range
@@ -102,6 +110,7 @@ class FlowCompModule(QWidget):
         self.levels_min_spinbox = QDoubleSpinBox()
         self.levels_min_spinbox.setSingleStep(10)
         self.levels_min_spinbox.setDecimals(1)
+        self.levels_min_spinbox.setSuffix(" [Pa]")
         self.levels_min_spinbox.setRange(-999, 999)
         self.levels_min_spinbox.setValue(levels[0])
         self.levels_min_spinbox.valueChanged[float].connect(self.setLevelsMin)
@@ -121,6 +130,7 @@ class FlowCompModule(QWidget):
         self.levels_max_spinbox = QDoubleSpinBox()
         self.levels_max_spinbox.setSingleStep(10)
         self.levels_max_spinbox.setDecimals(1)
+        self.levels_max_spinbox.setSuffix(" [Pa]")
         self.levels_max_spinbox.setRange(-999, 999)
         self.levels_max_spinbox.setValue(levels[1])
         self.levels_max_spinbox.valueChanged[float].connect(self.setLevelsMax)
@@ -130,6 +140,10 @@ class FlowCompModule(QWidget):
         # link/unlink cameras
         self.link_cam_checkbox = QCheckBox("Link cameras")
         self.link_cam_checkbox.stateChanged[int].connect(self.linkCameras)
+
+        # reset selection
+        self.reset_button = QPushButton("Reset")
+        self.reset_button.clicked.connect(self.resetCompViews)
         
         # add all to toolbar
         self.toolbar_layout = QHBoxLayout()
@@ -145,6 +159,7 @@ class FlowCompModule(QWidget):
         self.toolbar_layout.addWidget(self.levels_max_spinbox)
         self.toolbar_layout.addWidget(VerticalLine())
         self.toolbar_layout.addStretch(1)
+        self.toolbar_layout.addWidget(self.reset_button)
         self.toolbar_layout.addWidget(self.link_cam_checkbox)
 
         # -------------------------------------
@@ -167,12 +182,25 @@ class FlowCompModule(QWidget):
         self.active_patient_reader_lumen = vtk.vtkSTLReader()
         self.active_patient_reader_plaque = vtk.vtkSTLReader()
 
+        normals_lumen = vtk.vtkPolyDataNormals()
+        normals_lumen.ComputePointNormalsOn()
+        normals_lumen.ComputeCellNormalsOff()
+        normals_lumen.ConsistencyOn()
+        normals_lumen.SplittingOff()
+        normals_lumen.SetInputConnection(self.active_patient_reader_lumen.GetOutputPort())
+        normals_plaque = vtk.vtkPolyDataNormals()
+        normals_plaque.ComputePointNormalsOn()
+        normals_plaque.ComputeCellNormalsOff()
+        normals_plaque.ConsistencyOn()
+        normals_plaque.SplittingOff()
+        normals_plaque.SetInputConnection(self.active_patient_reader_plaque.GetOutputPort())
+
         self.active_patient_transform = vtk.vtkTransform()
         self.transform_filter_lumen = vtk.vtkTransformFilter()
-        self.transform_filter_lumen.SetInputConnection(self.active_patient_reader_lumen.GetOutputPort())
+        self.transform_filter_lumen.SetInputConnection(normals_lumen.GetOutputPort())
         self.transform_filter_lumen.SetTransform(self.active_patient_transform)
         self.transform_filter_plaque = vtk.vtkTransformFilter()
-        self.transform_filter_plaque.SetInputConnection(self.active_patient_reader_plaque.GetOutputPort())
+        self.transform_filter_plaque.SetInputConnection(normals_plaque.GetOutputPort())
         self.transform_filter_plaque.SetTransform(self.active_patient_transform)
 
         self.active_patient_mapper_lumen = vtk.vtkPolyDataMapper()
@@ -236,7 +264,7 @@ class FlowCompModule(QWidget):
         # Load items that can be displayed
         # --------------------------------------
         # clear current view
-        self.reset()
+        self.resetAllViews()
 
         # load latent space cases
         self.map_datasets.clear()
@@ -469,13 +497,16 @@ class FlowCompModule(QWidget):
         levels = self.getLevels()
         self.color_bar.setLevels(levels)
 
-        # update levels on surface if a surface map is displayed
+        # update levels on surface/streamlines if a surface map is displayed
         if not 'velocity' in self.active_field_name:
             for map_view in self.map_views:
                 map_view.img.setLevels(levels)
             for container in self.comp_patient_containers:
-                container.mapper.SetScalarRange(levels)
-            self.comp_patient_view.GetRenderWindow().Render()
+                container.surface_mapper.SetScalarRange(levels)
+        else:
+            for container in self.comp_patient_containers:
+                container.streamlines_mapper.SetScalarRange(levels)
+        self.comp_patient_view.GetRenderWindow().Render()
 
     
     def setScalarField(self, index):
@@ -488,27 +519,35 @@ class FlowCompModule(QWidget):
 
         # velocity field? -> display streamlines
         if 'velocity' in self.active_field_name:
-            # unicolor maps with lowest color (velocity 0)
-            for container in self.comp_patient_containers:
-                container.surface_mapper.SetScalarRange(10000, 10000)
+            # unicolor maps with lowest color (velocity 0), display streamlines
             for map_view in self.map_views:
                 map_view.img.setLevels((10000, 10000))
-
-            # display streamlines
-            # TODO
+            for container in self.comp_patient_containers:
+                container.surface_mapper.SetScalarRange(10000, 10000)
+                if 'sys' in self.active_field_name:
+                    container.setViewStreamlines(levels, systolic=True)
+                else:
+                    container.setViewStreamlines(levels, systolic=False)
+            self.levels_min_spinbox.setSingleStep(0.5)
+            self.levels_max_spinbox.setSingleStep(0.5)
+            self.levels_min_spinbox.setSuffix(" [m/s]")
+            self.levels_max_spinbox.setSuffix(" [m/s]")
 
         # surface field? -> display surface
         else:
             # set field on 3D views
             for container in self.comp_patient_containers:
-                container.setScalars(self.active_field_name)
-                container.surface_mapper.SetScalarRange(levels)
+                container.setViewSurface(self.active_field_name, levels)
 
             # set field on map views
             for i in range(len(self.map_datasets)):
                 img = self.map_views[i].img
                 img.setImage(self.map_datasets[i][self.active_field_name])
                 img.setLevels(levels)
+            self.levels_min_spinbox.setSingleStep(10)
+            self.levels_max_spinbox.setSingleStep(10)
+            self.levels_min_spinbox.setSuffix(" [Pa]")
+            self.levels_max_spinbox.setSuffix(" [Pa]")
         
         # update 3D views
         self.comp_patient_view.GetRenderWindow().Render()
@@ -521,7 +560,8 @@ class FlowCompModule(QWidget):
         for map_view in self.map_views:
             map_view.img.setColorMap(self.cmap)
         for container in self.comp_patient_containers:
-            container.mapper.SetLookupTable(self.vtk_lut)
+            container.surface_mapper.SetLookupTable(self.vtk_lut)
+            container.streamlines_mapper.SetLookupTable(self.vtk_lut)
         self.comp_patient_view.GetRenderWindow().Render()
         
     
@@ -554,26 +594,29 @@ class FlowCompModule(QWidget):
         self.active_patient_view.EnableRenderOff()
         super(FlowCompModule, self).hideEvent(event)
 
-
-    def reset(self):
-        # remove active patient
-        self.active_patient_renderer.RemoveActor(self.active_patient_actor_lumen)
-        self.active_patient_renderer.RemoveActor(self.active_patient_actor_plaque)
-
-        # delete active 3D views of map
+    
+    def resetCompViews(self):
+        # delete active 3D views of selected maps
         for id in self.active_map_ids:
             self.map_views[id].setActivated(False)
         self.active_map_ids.clear()
         for c in self.comp_patient_containers:
             self.comp_patient_view.GetRenderWindow().RemoveRenderer(c.renderer)
         self.comp_patient_containers.clear()
+        self.comp_patient_view.GetRenderWindow().Render()
+
+
+    def resetAllViews(self):
+        # remove active patient
+        self.active_patient_renderer.RemoveActor(self.active_patient_actor_lumen)
+        self.active_patient_renderer.RemoveActor(self.active_patient_actor_plaque)
+        self.active_patient_view.GetRenderWindow().Render()
+
+        # remove comparison views
+        self.resetCompViews()
 
         # remove map views from latent space navigator but keep map cache
         self.latent_space_widget.clear()
-
-        # render views
-        self.active_patient_view.GetRenderWindow().Render()
-        self.comp_patient_view.GetRenderWindow().Render()
 
 
     def close(self):
@@ -702,8 +745,16 @@ class LatentSpace3DContainer():
         # surface
         reader = vtk.vtkXMLUnstructuredGridReader()
         reader.SetFileName(surface_file_path)
-        reader.Update()
-        self.surface = reader.GetOutput()
+        geometry_filter = vtk.vtkGeometryFilter() # unstructured grid -> polydata
+        geometry_filter.SetInputConnection(reader.GetOutputPort())
+        normals = vtk.vtkPolyDataNormals()
+        normals.ComputePointNormalsOn()
+        normals.ComputeCellNormalsOff()
+        normals.ConsistencyOn()
+        normals.SplittingOff()
+        normals.SetInputConnection(geometry_filter.GetOutputPort())
+        normals.Update()
+        self.surface = normals.GetOutput()
         self.surface.GetPointData().SetActiveScalars(active_field_name)
         transform_filter = vtk.vtkTransformFilter()
         transform_filter.SetInputData(self.surface)
@@ -713,26 +764,27 @@ class LatentSpace3DContainer():
         self.surface_mapper.SetScalarRange(scale_min, scale_max)
         self.surface_mapper.SetLookupTable(lut)
         self.surface_actor = vtk.vtkActor()
+        self.surface_actor.GetProperty().SetInterpolationToGouraud()
         self.surface_actor.SetMapper(self.surface_mapper)
         
         # streamlines
-        reader = vtk.vtkXMLPolyDataReader()
         if stream_sys_path is not None:
+            reader = vtk.vtkXMLPolyDataReader()
             reader.SetFileName(stream_sys_path)
             reader.Update()
             self.streamlines_systolic = reader.GetOutput()
-            print(self.streamlines_systolic)
-            # self.streamlines_systolic.GetPointData().SetActiveScalars(active_field_name)
+            self.streamlines_systolic.GetPointData().SetActiveScalars('velocity_systolic_mag')
         else:
             self.streamlines_systolic = vtk.vtkPolyData()
 
         if stream_dia_path is not None:
+            reader = vtk.vtkXMLPolyDataReader()
             reader.SetFileName(stream_dia_path)
             reader.Update()
             self.streamlines_diastolic = reader.GetOutput()
+            self.streamlines_diastolic.GetPointData().SetActiveScalars('velocity_diastolic_mag')
         else:
             self.streamlines_diastolic = vtk.vtkPolyData()
-            self.streamlines_diastolic.GetPointData().SetActiveScalars(active_field_name)
 
         self.streamlines_transform_filter = vtk.vtkTransformFilter()
         self.streamlines_transform_filter.SetInputData(self.streamlines_systolic)
@@ -742,41 +794,59 @@ class LatentSpace3DContainer():
         self.streamlines_mapper.SetScalarRange(scale_min, scale_max)
         self.streamlines_mapper.SetLookupTable(lut)
         self.streamlines_actor = vtk.vtkActor()
+        self.streamlines_actor.GetProperty().SetLineWidth(3)
         self.streamlines_actor.SetMapper(self.streamlines_mapper)
 
         # create a renderer, save own camera (viewports will be set later)
         self.renderer = vtk.vtkRenderer()
         self.renderer.SetBackground(1, 1, 1)
-        self.renderer.SetBackground(0, 0, 0)
         self.camera = self.renderer.GetActiveCamera()
         self.camera.SetPosition(0, 0, -100)
         self.camera.SetFocalPoint(0, 0, 0)
         self.camera.SetViewUp(0, -1, 0)
-        self.renderer.AddActor(self.streamlines_actor) # TODO display dependent on state
+        if 'velocity_sys' in active_field_name:
+            self.renderer.AddActor(self.streamlines_actor)
+            self.surface_actor.GetProperty().FrontfaceCullingOn()
+        elif 'velocity_dia' in active_field_name:
+            self.streamlines_transform_filter.SetInputData(self.streamlines_diastolic)
+            self.renderer.AddActor(self.streamlines_actor)
+            self.surface_actor.GetProperty().FrontfaceCullingOn()
+        self.renderer.AddActor(self.surface_actor)
         self.renderer.AddActor(self.identifier_text)
         self.renderer.ResetCamera()
     
     def setIdText(self, identifier):
         self.identifier_text.SetInput(str(identifier))
     
-    def setScalars(self, field_name):
-        self.surface.GetPointData().SetActiveScalars(field_name)
-        self.streamlines_systolic.GetPointData().SetActiveScalars(field_name)
-        self.streamlines_diastolic.GetPointData().SetActiveScalars(field_name)
+    def setViewStreamlines(self, levels, systolic:bool):
+        if systolic:
+            self.streamlines_transform_filter.SetInputData(self.streamlines_systolic)
+        else:
+            self.streamlines_transform_filter.SetInputData(self.streamlines_diastolic)
 
-    def setColormapRange(self, scale_min, scale_max):
-        self.mapper.SetScalarRange(scale_min, scale_max)
+        self.surface.GetPointData().SetActiveScalars(" ") # disables scalar mapping on surface
+        self.surface_actor.GetProperty().FrontfaceCullingOn()
+        self.streamlines_transform_filter.Update()
+        self.streamlines_mapper.SetScalarRange(levels)
+        self.renderer.AddActor(self.streamlines_actor)
+
+    def setViewSurface(self, field_name, levels):
+        self.surface.GetPointData().SetActiveScalars(field_name)
+        self.surface_mapper.SetScalarRange(levels)
+        self.surface_actor.GetProperty().FrontfaceCullingOff()
+        self.renderer.RemoveActor(self.streamlines_actor)
 
     def useLinkedCamera(self, cam):
         self.renderer.SetActiveCamera(cam)
 
     def useOwnCamera(self):
-        # keep current view
+        # keep current view, reset to full model
         c = self.renderer.GetActiveCamera()
         self.camera.SetPosition(c.GetPosition())
         self.camera.SetFocalPoint(c.GetFocalPoint())
         self.camera.SetViewUp(c.GetViewUp())
         self.renderer.SetActiveCamera(self.camera)
+        self.renderer.ResetCamera()
 
 
 
