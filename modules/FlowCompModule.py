@@ -21,10 +21,17 @@ MAP_FIELD_NAMES = ['WSS_systolic',
 
 MAP_DISPLAY_NAMES = ['Systolic WSS',
                    'Diastolic WSS',
-                   'Systolic Backflow (reverse WSS)',
-                   'Diastolic Backflow (reverse WSS)',
+                   'Systolic Backflow',
+                   'Diastolic Backflow',
                    'Systolic Velocity',
                    'Diastolic Velocity']
+
+MAP_TITLE_NAMES = ['<b>Systolic Wall Shear Stress [Pa]</b>',
+                   '<b>Diastolic Wall Shear Stress [Pa]</b>',
+                   '<b>Systolic Backflow (reverse WSS) [Pa]</b>',
+                   '<b>Diastolic Backflow (reverse WSS) [Pa]</b>',
+                   '<b>Systolic Velocity [m/s]</b>',
+                   '<b>Diastolic Velocity [m/s]</b>']
 
 COLORMAP_NAMES = ['Viridis', 'Cividis', 'Plasma', 'Blues']
 COLORMAP_KEYS =  ['viridis', 'cividis', 'plasma', 'CET-L12']
@@ -72,7 +79,7 @@ class FlowCompModule(QWidget):
         self.vessel_rotations_internal = {}
 
         # possible scalar fields, will be mapped to surface or streamlines with active colormap
-        self.active_field_name = 'WSS_systolic'
+        self.active_field_name = MAP_FIELD_NAMES[0]
         self.map_scale_min = {'WSS_systolic':0,
                               'WSS_diastolic':0,   
                               'longitudinal_WSS_systolic':-50,
@@ -126,6 +133,7 @@ class FlowCompModule(QWidget):
         graphics_view.setBackground(None)
         graphics_view.setCentralWidget(self.color_bar)
         graphics_view.setMinimumSize(100, 36)
+        graphics_view.setMaximumSize(1000, 36)
         graphics_view.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Maximum)
         self.levels_max_spinbox = QDoubleSpinBox()
         self.levels_max_spinbox.setSingleStep(10)
@@ -134,33 +142,34 @@ class FlowCompModule(QWidget):
         self.levels_max_spinbox.setRange(-999, 999)
         self.levels_max_spinbox.setValue(levels[1])
         self.levels_max_spinbox.valueChanged[float].connect(self.setLevelsMax)
+        self.colormap_title = QLabel(MAP_TITLE_NAMES[0])
 
-        # TODO set global plaque visibility
-        
         # link/unlink cameras
         self.link_cam_checkbox = QCheckBox("Link cameras")
         self.link_cam_checkbox.stateChanged[int].connect(self.linkCameras)
 
         # reset selection
-        self.reset_button = QPushButton("Reset")
+        self.reset_button = QPushButton("Reset selection")
+        self.reset_button.setSizePolicy(QSizePolicy.Maximum, QSizePolicy.Maximum)
         self.reset_button.clicked.connect(self.resetCompViews)
         
-        # add all to toolbar
-        self.toolbar_layout = QHBoxLayout()
-        self.toolbar_layout.addWidget(QLabel("Side:"))
-        self.toolbar_layout.addWidget(self.side_combobox)
-        self.toolbar_layout.addWidget(VerticalLine())
-        self.toolbar_layout.addWidget(QLabel("Colormap:"))
-        self.toolbar_layout.addWidget(self.colormap_combobox)
-        self.toolbar_layout.addWidget(QLabel("Active scalar field:"))
-        self.toolbar_layout.addWidget(self.scalar_field_combobox)
-        self.toolbar_layout.addWidget(self.levels_min_spinbox)
-        self.toolbar_layout.addWidget(graphics_view)
-        self.toolbar_layout.addWidget(self.levels_max_spinbox)
-        self.toolbar_layout.addWidget(VerticalLine())
-        self.toolbar_layout.addStretch(1)
-        self.toolbar_layout.addWidget(self.reset_button)
-        self.toolbar_layout.addWidget(self.link_cam_checkbox)
+        # add all to toolbar (row, column, rowspan, columnspan)
+        self.toolbar_layout = QGridLayout()
+        self.toolbar_layout.addWidget(QLabel("Side:"), 0, 0, Qt.AlignBottom)
+        self.toolbar_layout.addWidget(self.side_combobox, 1, 0)
+        self.toolbar_layout.addWidget(VerticalLine(), 0, 1, 2, 1)
+        self.toolbar_layout.addWidget(QLabel("Colormap:"), 0, 2, Qt.AlignBottom)
+        self.toolbar_layout.addWidget(self.colormap_combobox, 1, 2)
+        self.toolbar_layout.addWidget(QLabel("Active scalar field:"), 0, 3, Qt.AlignBottom)
+        self.toolbar_layout.addWidget(self.scalar_field_combobox, 1, 3)
+        self.toolbar_layout.addWidget(self.colormap_title, 0, 4, 1, 3, Qt.AlignHCenter | Qt.AlignBottom)
+        self.toolbar_layout.addWidget(self.levels_min_spinbox, 1, 4)
+        self.toolbar_layout.addWidget(graphics_view, 1, 5)
+        self.toolbar_layout.addWidget(self.levels_max_spinbox, 1, 6)
+        self.toolbar_layout.addWidget(VerticalLine(), 0, 7, 2, 1)
+        self.toolbar_layout.setColumnStretch(8, 1)
+        self.toolbar_layout.addWidget(self.reset_button, 0, 8, Qt.AlignRight)
+        self.toolbar_layout.addWidget(self.link_cam_checkbox, 1, 8, Qt.AlignRight)
 
         # -------------------------------------
         # 3D views
@@ -214,6 +223,8 @@ class FlowCompModule(QWidget):
         self.active_patient_actor_plaque.SetMapper(self.active_patient_mapper_plaque)
         self.active_patient_actor_lumen.GetProperty().SetColor(COLOR_LUMEN)
         self.active_patient_actor_plaque.GetProperty().SetColor(COLOR_PLAQUE)
+        self.active_patient_actor_plaque.GetProperty().SetOpacity(0.5)
+        self.active_patient_actor_plaque.GetProperty().BackfaceCullingOn()
 
         # comparison patients vtk objects
         style = vtk.vtkInteractorStyleTrackballCamera()
@@ -511,6 +522,7 @@ class FlowCompModule(QWidget):
     
     def setScalarField(self, index):
         self.active_field_name = MAP_FIELD_NAMES[index]
+        self.colormap_title.setText(MAP_TITLE_NAMES[index])
         levels = self.getLevels()
 
         # update labels, colorbar is automatically updated
