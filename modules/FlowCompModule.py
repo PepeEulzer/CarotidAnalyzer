@@ -1,5 +1,6 @@
 import os
 import random
+import json
 
 import vtk
 import numpy as np
@@ -49,7 +50,16 @@ def getVTKLookupTable(cmap, nPts=512):
         vtk_lut.SetTableValue(i, pg_lut[i,0], pg_lut[i,1], pg_lut[i,2])
     return vtk_lut
 
-
+def getMetaInformation(meta_path):
+    stenosis_degree = 0.0
+    if os.path.exists(meta_path):
+            try:
+                with open(meta_path, 'r') as f:
+                    meta_dict = json.load(f)
+                stenosis_degree = np.round(float(meta_dict['stenosis_degree']), 1)
+            except:
+                print("FlowComp module could not load " + meta_path)
+    return stenosis_degree
 
 class LatentSpaceDataSet(object):
     """
@@ -320,7 +330,7 @@ class FlowCompModule(QWidget):
     
     def setWorkingDir(self, dir, patient_data):
         self.working_dir = dir
-        self.patient_data = patient_data
+        self.patient_data = patient_data # contains all dicts on all patient file paths
 
         # --------------------------------------
         # Load items that can be displayed
@@ -333,7 +343,11 @@ class FlowCompModule(QWidget):
         surface_file_pattern = os.path.join(self.working_dir, "flow_wall_data", "patient*_wss.vtu")
         for surface_file in glob(surface_file_pattern):
             # if map and surface file exist -> create a case
-            latent_space_dataset = LatentSpaceDataSet(stenosis_degree=random.randint(0, 100))
+            patient_id_lr = os.path.basename(surface_file)[:-8]
+            patient_id = patient_id_lr.split('_left')[0].split('_right')[0]
+            meta_path = os.path.join(self.working_dir, patient_id, "models", patient_id_lr + "_meta.txt")
+            stenosis_degree = getMetaInformation(meta_path)
+            latent_space_dataset = LatentSpaceDataSet(stenosis_degree=stenosis_degree)
 
             map_file = surface_file[:-4] + "_map_images.npz"
             if os.path.exists(map_file):
@@ -501,7 +515,8 @@ class FlowCompModule(QWidget):
             plaque_path = self.active_patient_dict['plaque_model_right']
 
         # get stenosis degree of new case
-        stenosis_degree = random.randint(0,100)
+        meta_path = lumen_path[:-9] + "meta.txt"
+        stenosis_degree = getMetaInformation(meta_path)
         self.active_patient_text.SetInput(case_identifier + "\n" + str(stenosis_degree) + "% Stenosis")
 
         if lumen_path:
