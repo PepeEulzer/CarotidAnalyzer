@@ -1,4 +1,6 @@
 import os
+import random
+
 import vtk
 import numpy as np
 import pyqtgraph as pg
@@ -49,6 +51,54 @@ def getVTKLookupTable(cmap, nPts=512):
 
 
 
+class LatentSpaceDataSet(object):
+    """
+    A wrapper of all items related to a single latent space comparison case.
+    Contains the map data set, paths to the 3D surfaces, streamlines, etc.
+    Also computes and contains the similarity score given a new carotid model.
+    Sorting these objects automatically sorts them by their similarity score.
+    """
+    # 2D map objects
+    map_dataset = None  # np dict of all map images (wss_map_images.npz)
+    map_view = None     # MapViewBox (pg.ViewBox) of the active map
+    is_clicked = False  # indicates if the map is clicked (3D view active)
+
+    # 3D objects (paths)
+    surface_dataset_path = None      # path to surface file in flow folder, if exists (wss.vtu)
+    systolic_streamline_path = None  # path to systolic streamlines, if exists (systolic.vtp)
+    diastolic_streamline_path = None # path to diastolic streamlines, if exists (diastolic.vtp)
+
+    # similarity variables
+    diameter_profile = None   # np.array of ACC/ACI diameters, equidistantly spaced
+    stenosis_degree = 0.0     # highest stenosis degree of ACC/ACI branch in [0,100]
+    similarity_shape = 0.0    # how similar is the latent space shape? [0,1]
+    similarity_diameter = 0.0 # how similar is the diameter profile? [0,1]
+    similarity_stenosis = 0.0 # how similar is the stenosis degree? [0,1]
+    similarity_score = 0.0    # combined similarity score given weights for each component, value in [0,1]
+
+    def __init__(self, stenosis_degree):
+        self.stenosis_degree = stenosis_degree
+
+    def __eq__(self, other):
+        return self.similarity_score == other.similarity_score
+
+    def __lt__(self, other):
+        return self.similarity_score < other.similarity_score
+
+    def compareWithCase(self, case_stenosis_degree, diam_weight=0.5, stenosis_weight=0.5):
+        # each value is 1 - difference / max_difference
+        self.similarity_stenosis = 1.0 - abs(self.stenosis_degree - case_stenosis_degree) / 100.0
+        self.updateSimilarityScore(diam_weight, stenosis_weight)
+        if self.map_view is not None:
+            self.map_view.updateScoreBars([self.similarity_shape, self.similarity_diameter, self.similarity_stenosis])
+
+    def updateSimilarityScore(self, diam_weight=0.5, stenosis_weight=0.5):
+        if not -0.0001 <= diam_weight + stenosis_weight - 1.0 <= 0.0001:
+            print("WARNING: Diameter weight", diam_weight, "and stenosis weight", stenosis_weight, "do not add to 1.")
+        self.similarity_score = diam_weight * self.similarity_diameter + stenosis_weight * self.similarity_stenosis
+
+
+
 class FlowCompModule(QWidget):
     """
     Visualization module for comparing a new geometry to similar geometries with computed flow field.
@@ -62,14 +112,9 @@ class FlowCompModule(QWidget):
         self.polling_counter = 0 # for cross-renderwindow camera synchronisation (every 10 frames)
 
         # latent space data
-        self.map_datasets = []               # np dict of every map in flow folder (wss_map_images.npz)
-        self.map_views = []                  # LatentSpaceItem (pg.ViewBox) of every map in flow folder with active scalar data
-        self.surface_dataset_paths = []      # paths to all surface files in flow folder (wss.vtu)
-        self.systolic_streamline_paths = []  # paths to all systolic streamlines (systolic.vtp)
-        self.diastolic_streamline_paths = [] # paths to all diastolic streamlines (diastolic.vtp)
-
-        self.active_map_ids = []             # indices into above lists, indicate active (clicked) cases
-        self.comp_patient_containers = []    # LatentSpace3DContainer of all active 3D views
+        self.latent_space_datasets = []
+        self.active_map_ids = []          # indices into above list, indicate active (clicked) cases
+        self.comp_patient_containers = [] # LatentSpace3DContainer of all active 3D views
         self.nr_latent_space_items = INITIAL_NR_MAPS
 
         # translation and rotation dicts for cases, key is the patient id (+ left/right)
@@ -118,7 +163,7 @@ class FlowCompModule(QWidget):
         self.levels_min_spinbox.setSingleStep(10)
         self.levels_min_spinbox.setDecimals(1)
         self.levels_min_spinbox.setSuffix(" [Pa]")
-        self.levels_min_spinbox.setRange(-999, 999)
+        self.levels_min_spinbox.setRange(-999, levels[1])
         self.levels_min_spinbox.setValue(levels[0])
         self.levels_min_spinbox.valueChanged[float].connect(self.setLevelsMin)
         self.color_bar = pg.ColorBarItem(
@@ -139,7 +184,7 @@ class FlowCompModule(QWidget):
         self.levels_max_spinbox.setSingleStep(10)
         self.levels_max_spinbox.setDecimals(1)
         self.levels_max_spinbox.setSuffix(" [Pa]")
-        self.levels_max_spinbox.setRange(-999, 999)
+        self.levels_max_spinbox.setRange(levels[0], 999)
         self.levels_max_spinbox.setValue(levels[1])
         self.levels_max_spinbox.valueChanged[float].connect(self.setLevelsMax)
         self.colormap_title = QLabel(MAP_TITLE_NAMES[0])
@@ -188,6 +233,12 @@ class FlowCompModule(QWidget):
         self.active_patient_view.GetRenderWindow().AddRenderer(self.active_patient_renderer)
 
         # active patient vtk pipelines
+        self.active_patient_text = vtk.vtkTextActor()
+        p = self.active_patient_text.GetTextProperty()
+        p.SetColor(0, 0, 0)
+        p.SetFontSize(20)
+        p.SetBackgroundColor(1, 1, 1)
+
         self.active_patient_reader_lumen = vtk.vtkSTLReader()
         self.active_patient_reader_plaque = vtk.vtkSTLReader()
 
@@ -278,50 +329,43 @@ class FlowCompModule(QWidget):
         self.resetAllViews()
 
         # load latent space cases
-        self.map_datasets.clear()
-        self.surface_dataset_paths.clear()
-        self.systolic_streamline_paths.clear()
-        self.diastolic_streamline_paths.clear()
+        self.latent_space_datasets.clear()
         surface_file_pattern = os.path.join(self.working_dir, "flow_wall_data", "patient*_wss.vtu")
         for surface_file in glob(surface_file_pattern):
             # if map and surface file exist -> create a case
+            latent_space_dataset = LatentSpaceDataSet(stenosis_degree=random.randint(0, 100))
+
             map_file = surface_file[:-4] + "_map_images.npz"
             if os.path.exists(map_file):
-                self.surface_dataset_paths.append(surface_file)
-                self.map_datasets.append(np.load(map_file))
+                latent_space_dataset.surface_dataset_path = surface_file
+                latent_space_dataset.map_dataset = np.load(map_file)
             else:
                 continue
             
             # load systolic streamlines if they exist
             systolic_streamline_file = surface_file[:-7] + "velocity_systolic.vtp"
             if os.path.exists(systolic_streamline_file):
-                self.systolic_streamline_paths.append(systolic_streamline_file)
-            else:
-                self.systolic_streamline_paths.append(None)
+                latent_space_dataset.systolic_streamline_path = systolic_streamline_file
 
             # load diastolic streamlines if they exist
             diastolic_streamline_file = surface_file[:-7] + "velocity_diastolic.vtp"
             if os.path.exists(diastolic_streamline_file):
-                self.diastolic_streamline_paths.append(diastolic_streamline_file)
-            else:
-                self.diastolic_streamline_paths.append(None)
+                latent_space_dataset.diastolic_streamline_path = diastolic_streamline_file
+
+            self.latent_space_datasets.append(latent_space_dataset)
 
         # create all map widgets with the currently active image
-        self.map_views = []
-        for id, map_dataset in enumerate(self.map_datasets):
+        for index, dataset in enumerate(self.latent_space_datasets):
             # create view of map as an image item
-            img_data = map_dataset[self.active_field_name]
-            map_view = LatentSpaceItem(id, img_data, self.getLevels(), self.cmap)
+            img_data = dataset.map_dataset[self.active_field_name]
+            map_view = MapViewBox(index, img_data, self.getLevels(), self.cmap)
             map_view.clicked[int].connect(self.mapClicked)
-            self.map_views.append(map_view)
+            dataset.map_view = map_view
 
         # initial latent space view, unsorted
-        self.nr_latent_space_items = min(INITIAL_NR_MAPS, len(self.map_views))
+        self.nr_latent_space_items = min(INITIAL_NR_MAPS, len(self.latent_space_datasets))
         for i in range(self.nr_latent_space_items):
-            self.latent_space_widget.addItem(self.map_views[i], row=0, col=i)
-
-        # load streamline filepath
-        
+            self.latent_space_widget.addItem(self.latent_space_datasets[i].map_view, row=0, col=i)
 
         # --------------------------------------
         # Load translations and rotations
@@ -356,8 +400,8 @@ class FlowCompModule(QWidget):
 
 
     def increaseMaps(self):
-        if self.nr_latent_space_items < len(self.map_views)-1:
-            map_view = self.map_views[self.nr_latent_space_items]
+        if self.nr_latent_space_items < len(self.latent_space_datasets)-1:
+            map_view = self.latent_space_datasets[self.nr_latent_space_items].map_view
             self.latent_space_widget.addItem(map_view, row=0, col=self.nr_latent_space_items)
             self.nr_latent_space_items += 1
     
@@ -365,37 +409,37 @@ class FlowCompModule(QWidget):
     def decreaseMaps(self):
         if self.nr_latent_space_items > 1:
             self.nr_latent_space_items -= 1
-            map_view = self.map_views[self.nr_latent_space_items]
+            map_view = self.latent_space_datasets[self.nr_latent_space_items].map_view
             self.latent_space_widget.removeItem(map_view)
 
 
-    def mapClicked(self, id):
-        img_box_clicked = self.map_views[id]
-        id = img_box_clicked.id
-        if id not in self.active_map_ids:
+    def mapClicked(self, index):
+        ls_dataset = self.latent_space_datasets[index]
+        if index not in self.active_map_ids:
             # box is new -> activate
-            self.active_map_ids.append(img_box_clicked.id)
-            img_box_clicked.setActivated(True)
+            self.active_map_ids.append(index)
+            ls_dataset.is_clicked = True
+            ls_dataset.map_view.setActivated(True)
 
             # create a container for 3D vis of selected map
-            case_identifier = os.path.basename(self.surface_dataset_paths[id])[:-8]
+            case_identifier = os.path.basename(ls_dataset.surface_dataset_path)[:-8]
             try:
                 translation = self.vessel_translations[case_identifier]
                 rotation = self.vessel_rotations[case_identifier]
-                # print("Loading surface and transforms for", case_identifier)
             except:
                 print("Warning: No translation/rotation found for", case_identifier)
                 translation = None
                 rotation = None
             levels = self.getLevels()
             container = LatentSpace3DContainer(
-                surface_file_path=self.surface_dataset_paths[id],
+                surface_file_path=ls_dataset.surface_dataset_path,
                 active_field_name=self.active_field_name,
                 scale_min=levels[0],
                 scale_max=levels[1],
                 lut=self.vtk_lut,
-                stream_sys_path=self.systolic_streamline_paths[id],
-                stream_dia_path=self.diastolic_streamline_paths[id],
+                stenosis_degree=ls_dataset.stenosis_degree,
+                stream_sys_path=ls_dataset.systolic_streamline_path,
+                stream_dia_path=ls_dataset.diastolic_streamline_path,
                 trans=translation,
                 rot=rotation
                 )
@@ -406,12 +450,13 @@ class FlowCompModule(QWidget):
         
         else:
             # box is already active -> deactive
-            index = self.active_map_ids.index(id)
-            self.active_map_ids.pop(index)
-            img_box_clicked.setActivated(False)
+            on_screen_id = self.active_map_ids.index(index)
+            self.active_map_ids.pop(on_screen_id)
+            ls_dataset.is_clicked = False
+            ls_dataset.map_view.setActivated(False)
 
             # remove actor, camera, renderer
-            container = self.comp_patient_containers.pop(index)
+            container = self.comp_patient_containers.pop(on_screen_id)
             self.comp_patient_view.GetRenderWindow().RemoveRenderer(container.renderer)
 
         # update the active items, update scenes
@@ -423,13 +468,16 @@ class FlowCompModule(QWidget):
             w = 1.0 / nr_cols # single viewport width
         for i in range(nr_maps):
             id = self.active_map_ids[i]
-            self.map_views[id].setIdText(i+1)
+            self.latent_space_datasets[id].map_view.setIdText(i+1)
 
             # update viewports
             row = nr_rows - 1 - int(i / nr_cols) # top -> bottom rows
             col = int(i % nr_cols)
             self.comp_patient_containers[i].renderer.SetViewport(col * w, row * h, (col + 1) * w, (row + 1) * h)
-            self.comp_patient_containers[i].setIdText(i+1)
+            if nr_maps <= 9:
+                self.comp_patient_containers[i].setIdText(i+1, True)
+            else:
+                self.comp_patient_containers[i].setIdText(i+1, False)
 
         # render all comparison views
         self.comp_patient_view.GetRenderWindow().Render()
@@ -439,6 +487,7 @@ class FlowCompModule(QWidget):
         self.active_patient_dict = patient_dict
         patient_id = self.active_patient_dict['patient_ID']
         if patient_id == None:
+            print("No patient ID could be found.")
             return
 
         # load the models
@@ -451,12 +500,18 @@ class FlowCompModule(QWidget):
             lumen_path = self.active_patient_dict['lumen_model_right']
             plaque_path = self.active_patient_dict['plaque_model_right']
 
+        # get stenosis degree of new case
+        stenosis_degree = random.randint(0,100)
+        self.active_patient_text.SetInput(case_identifier + "\n" + str(stenosis_degree) + "% Stenosis")
+
         if lumen_path:
             self.active_patient_reader_lumen.SetFileName(lumen_path)
             self.active_patient_reader_lumen.Update()
             self.active_patient_renderer.AddActor(self.active_patient_actor_lumen)
+            self.active_patient_renderer.AddActor(self.active_patient_text)
         else:
             self.active_patient_renderer.RemoveActor(self.active_patient_actor_lumen)
+            self.active_patient_renderer.RemoveActor(self.active_patient_text)
         
         if plaque_path:
             self.active_patient_reader_plaque.SetFileName(plaque_path)
@@ -484,10 +539,30 @@ class FlowCompModule(QWidget):
         self.active_patient_camera.SetFocalPoint(0, 0, 0)
         self.active_patient_camera.SetViewUp(0, -1, 0)
         self.active_patient_renderer.ResetCamera()
-
-        # TODO sort latent space
-
         self.active_patient_view.GetRenderWindow().Render()
+
+        #########################################
+        # sort the latent space
+        #########################################
+        # make comparisons
+        for ls_dataset in self.latent_space_datasets:
+            ls_dataset.compareWithCase(case_stenosis_degree=stenosis_degree)
+        self.sortLatentSpace()
+
+        # display maps in new order
+        self.latent_space_widget.clear()
+        for i in range(self.nr_latent_space_items):
+            self.latent_space_widget.addItem(self.latent_space_datasets[i].map_view, row=0, col=i)
+
+
+    
+    def sortLatentSpace(self):
+        self.latent_space_datasets = sorted(self.latent_space_datasets, reverse=True)
+        self.active_map_ids.clear()
+        for index, ls_dataset in enumerate(self.latent_space_datasets):
+            ls_dataset.map_view.list_index = index # will be returned on click
+            if ls_dataset.is_clicked:
+                self.active_map_ids.append(index)
 
     
     def getLevels(self):
@@ -507,11 +582,13 @@ class FlowCompModule(QWidget):
     def __updateLevels(self):
         levels = self.getLevels()
         self.color_bar.setLevels(levels)
+        self.levels_max_spinbox.setRange(levels[0], 999)
+        self.levels_min_spinbox.setRange(-999, levels[1])
 
         # update levels on surface/streamlines if a surface map is displayed
         if not 'velocity' in self.active_field_name:
-            for map_view in self.map_views:
-                map_view.img.setLevels(levels)
+            for ls_dataset in self.latent_space_datasets:
+                ls_dataset.map_view.img.setLevels(levels)
             for container in self.comp_patient_containers:
                 container.surface_mapper.SetScalarRange(levels)
         else:
@@ -527,13 +604,15 @@ class FlowCompModule(QWidget):
 
         # update labels, colorbar is automatically updated
         self.levels_min_spinbox.setValue(levels[0])
+        self.levels_min_spinbox.setRange(-999, levels[1])
         self.levels_max_spinbox.setValue(levels[1])
+        self.levels_max_spinbox.setRange(levels[0], 999)
 
         # velocity field? -> display streamlines
         if 'velocity' in self.active_field_name:
             # unicolor maps with lowest color (velocity 0), display streamlines
-            for map_view in self.map_views:
-                map_view.img.setLevels((10000, 10000))
+            for ls_dataset in self.latent_space_datasets:
+                ls_dataset.map_view.img.setLevels((10000, 10000))
             for container in self.comp_patient_containers:
                 container.surface_mapper.SetScalarRange(10000, 10000)
                 if 'sys' in self.active_field_name:
@@ -552,9 +631,9 @@ class FlowCompModule(QWidget):
                 container.setViewSurface(self.active_field_name, levels)
 
             # set field on map views
-            for i in range(len(self.map_datasets)):
-                img = self.map_views[i].img
-                img.setImage(self.map_datasets[i][self.active_field_name])
+            for ls_dataset in self.latent_space_datasets:
+                img = ls_dataset.map_view.img
+                img.setImage(ls_dataset.map_dataset[self.active_field_name])
                 img.setLevels(levels)
             self.levels_min_spinbox.setSingleStep(10)
             self.levels_max_spinbox.setSingleStep(10)
@@ -569,8 +648,8 @@ class FlowCompModule(QWidget):
         self.cmap = pg.colormap.get(COLORMAP_KEYS[index])
         self.vtk_lut = getVTKLookupTable(self.cmap)
         self.color_bar.setColorMap(self.cmap)
-        for map_view in self.map_views:
-            map_view.img.setColorMap(self.cmap)
+        for ls_dataset in self.latent_space_datasets:
+            ls_dataset.map_view.img.setColorMap(self.cmap)
         for container in self.comp_patient_containers:
             container.surface_mapper.SetLookupTable(self.vtk_lut)
             container.streamlines_mapper.SetLookupTable(self.vtk_lut)
@@ -610,7 +689,7 @@ class FlowCompModule(QWidget):
     def resetCompViews(self):
         # delete active 3D views of selected maps
         for id in self.active_map_ids:
-            self.map_views[id].setActivated(False)
+            self.latent_space_datasets[id].map_view.setActivated(False)
         self.active_map_ids.clear()
         for c in self.comp_patient_containers:
             self.comp_patient_view.GetRenderWindow().RemoveRenderer(c.renderer)
@@ -655,11 +734,12 @@ class ScrollableGraphicsLayoutWidget(pg.GraphicsLayoutWidget):
 
 
 
-class LatentSpaceItem(pg.ViewBox):
+class MapViewBox(pg.ViewBox):
     clicked = pyqtSignal(int)
-    def __init__(self, id, img_data, levels, colormap, parent=None):
+    def __init__(self, list_index, img_data, levels, colormap, parent=None):
         super().__init__(parent=parent, border=None, lockAspect=True, enableMouse=False, enableMenu=False, defaultPadding=0)
-        self.id = id
+        # needs to know the global index, as it is returned on click
+        self.list_index = list_index
 
         # create internal items
         self.bar_stack = BarStackItem(img_data.shape[0], img_data.shape[1], [1.0, 1.0, 1.0], ['r', 'g', 'b'], thickness=50.0)
@@ -681,8 +761,12 @@ class LatentSpaceItem(pg.ViewBox):
         self.addItem(self.img)
 
 
+    def updateScoreBars(self, normalized_values_list):
+        self.bar_stack.setValues(normalized_values_list)
+
+
     def mousePressEvent(self, ev):
-        self.clicked.emit(self.id)
+        self.clicked.emit(self.list_index)
 
     
     def setActivated(self, activate):
@@ -703,10 +787,16 @@ class BarStackItem(pg.GraphicsObject):
     def __init__(self, y_offset, x_width, normalized_values_list, colors_list, thickness):
         super().__init__()
         self.y_offset = y_offset
-        self.ends = np.array(normalized_values_list)[::-1] * x_width
+        self.x_width = x_width
+        self.ends = np.array(normalized_values_list)[::-1] * self.x_width
         self.thickness = thickness
         self.colors = colors_list
         self.colors.reverse() # colors are internally ordered bottom->top
+        self.generatePicture()
+
+    
+    def setValues(self, normalized_values_list):
+        self.ends = np.array(normalized_values_list)[::-1] * self.x_width
         self.generatePicture()
     
 
@@ -716,6 +806,8 @@ class BarStackItem(pg.GraphicsObject):
         for i in range(len(self.ends)):
             p.setBrush(pg.mkBrush(self.colors[i]))
             p.drawRect(QtCore.QRectF(0.0, self.y_offset + self.thickness*(i+1), self.ends[i], self.thickness))
+        p.setBrush(pg.mkBrush(0,0,0))
+        p.drawRect(QtCore.QRectF(0.0, self.y_offset + self.thickness, self.x_width, 0.0))
         p.end()
     
 
@@ -733,9 +825,10 @@ class LatentSpace3DContainer():
     Provides access to 3D items (camera, renderer, actor, mapper...)
     of one comparison case.
     """
-    def __init__(self, surface_file_path, active_field_name, scale_min, scale_max, lut, 
+    def __init__(self, surface_file_path, active_field_name, scale_min, scale_max, lut, stenosis_degree,
                  stream_sys_path=None, stream_dia_path=None, trans=None, rot=None):
         # id text
+        self.stenosis_degree_str = "\n" + str(stenosis_degree) + "% Stenosis"
         self.identifier_text = vtk.vtkTextActor()
         p = self.identifier_text.GetTextProperty()
         p.SetColor(0, 0, 0)
@@ -827,8 +920,11 @@ class LatentSpace3DContainer():
         self.renderer.AddActor(self.identifier_text)
         self.renderer.ResetCamera()
     
-    def setIdText(self, identifier):
-        self.identifier_text.SetInput(str(identifier))
+    def setIdText(self, identifier, show_degree=True):
+        if show_degree:
+            self.identifier_text.SetInput(str(identifier) + self.stenosis_degree_str)
+        else:
+            self.identifier_text.SetInput(str(identifier))
     
     def setViewStreamlines(self, levels, systolic:bool):
         if systolic:
