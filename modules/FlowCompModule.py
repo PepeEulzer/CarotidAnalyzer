@@ -12,6 +12,7 @@ from PyQt5.QtWidgets import (QWidget, QGridLayout, QHBoxLayout, QVBoxLayout, QLa
 from PyQt5.QtCore import Qt, pyqtSignal
 from PyQt5 import QtCore, QtGui
 from vtk.qt.QVTKRenderWindowInteractor import QVTKRenderWindowInteractor
+from vtk.util.numpy_support import vtk_to_numpy
 
 from defaults import *
 
@@ -50,6 +51,7 @@ def getVTKLookupTable(cmap, nPts=512):
         vtk_lut.SetTableValue(i, pg_lut[i,0], pg_lut[i,1], pg_lut[i,2])
     return vtk_lut
 
+
 def getMetaInformation(meta_path):
     stenosis_degree = 0.0
     if os.path.exists(meta_path):
@@ -60,6 +62,69 @@ def getMetaInformation(meta_path):
             except:
                 print("FlowComp module could not load " + meta_path)
     return stenosis_degree
+
+
+def processCenterline(centerline_path):
+    # returns centerline radii of ACC/ACI branch and the index of the bifurcation point
+    radii_array = None
+    bifurcation_index = 0
+
+    if not os.path.exists(centerline_path):
+        return radii_array, bifurcation_index
+
+    reader = vtk.vtkXMLPolyDataReader()
+    reader.SetFileName(centerline_path)
+    reader.Update()
+    centerlines = reader.GetOutput()
+    radii_flat = centerlines.GetPointData().GetArray('MaximumInscribedSphereRadius')
+
+    if centerlines.GetLines().GetNumberOfCells() < 2:
+        return radii_array, bifurcation_index
+
+    # iterate the first line (ACC/ACI)
+    l = centerlines.GetLines()
+    l.InitTraversal()
+    pointIds = vtk.vtkIdList()
+    l.GetNextCell(pointIds)
+
+    # retrieve position data
+    points = vtk.vtkPoints()
+    centerlines.GetPoints().GetPoints(pointIds, points)
+    p = vtk_to_numpy(points.GetData())
+
+    # calculate arc len (x-axis)
+    # arc = p - np.roll(p, 1, axis=0)
+    # arc = np.sqrt((arc*arc).sum(axis=1))
+    # arc[0] = 0
+    # arc = np.cumsum(arc)
+
+    # retrieve radius data (y-axis)
+    radii = vtk.vtkDoubleArray()
+    radii.SetNumberOfTuples(pointIds.GetNumberOfIds())
+    radii_flat.GetTuples(pointIds, radii)
+    radii_array = vtk_to_numpy(radii)
+
+    # iterate second line (ACC/ACE)
+    pointIds = vtk.vtkIdList()
+    l.GetNextCell(pointIds)
+    points2 = vtk.vtkPoints()
+    centerlines.GetPoints().GetPoints(pointIds, points2)
+    p2 = vtk_to_numpy(points2.GetData())
+
+    # find last overlap index
+    len1 = p.shape[0]
+    len2 = p2.shape[0]
+    if len1 < len2:
+        overlap_mask = np.not_equal(p, p2[:len1])
+    else:
+        overlap_mask = np.not_equal(p[:len2], p2)
+    overlap_mask = np.all(overlap_mask, axis=1) # AND over tuples
+    bifurcation_index = np.searchsorted(overlap_mask, True) # first position where lines diverge
+
+    # TODO radii array is not equidistant
+    return radii_array, bifurcation_index
+
+
 
 class LatentSpaceDataSet(object):
     """
@@ -80,13 +145,16 @@ class LatentSpaceDataSet(object):
 
     # similarity variables
     diameter_profile = None   # np.array of ACC/ACI diameters, equidistantly spaced
+    bifurcation_index = 0     # index into diameter profile for registering at bifurcation
     stenosis_degree = 0.0     # highest stenosis degree of ACC/ACI branch in [0,100]
     similarity_shape = 0.0    # how similar is the latent space shape? [0,1]
     similarity_diameter = 0.0 # how similar is the diameter profile? [0,1]
     similarity_stenosis = 0.0 # how similar is the stenosis degree? [0,1]
     similarity_score = 0.0    # combined similarity score given weights for each component, value in [0,1]
 
-    def __init__(self, stenosis_degree):
+    def __init__(self, case_id, centerline_path, stenosis_degree):
+        self.case_identifier = case_id
+        self.diameter_profile, self.bifurcation_index = processCenterline(centerline_path)
         self.stenosis_degree = stenosis_degree
 
     def __eq__(self, other):
@@ -95,17 +163,45 @@ class LatentSpaceDataSet(object):
     def __lt__(self, other):
         return self.similarity_score < other.similarity_score
 
-    def compareWithCase(self, case_stenosis_degree, diam_weight=0.5, stenosis_weight=0.5):
+    def compareWithCase(self, distance_to_case, case_stenosis_degree, case_diameter_profile, case_bifurcation_index,
+                        shape_weight=1.0/3.0, diam_weight=1.0/3.0, stenosis_weight=1.0/3.0):
+        if self.diameter_profile is None or case_diameter_profile is None:
+            mean_diameter_distance = 1.5 # set to max
+        else:
+            # compare diameter profiles, register at bifurcation -> crop start/end to smaller array
+            r1 = self.diameter_profile # internal radii (will be cropped)
+            r2 = case_diameter_profile # external radii (will be cropped)
+            i1 = self.bifurcation_index
+            i2 = case_bifurcation_index
+            if i1 < i2:
+                r2 = r2[i2-i1:]
+            else:
+                r1 = r1[i1-i2:]
+            l1 = r1.shape[0] # length of internal array
+            l2 = r2.shape[0] # length of case array
+            if l1 < l2:
+                r2 = r2[:l1]
+            else:
+                r1 = r1[:l2]
+            assert(r1.shape[0] == r2.shape[0])
+            mean_diameter_distance = np.mean(np.abs(r1-r2))
+
         # each value is 1 - difference / max_difference
+        self.similarity_shape = 1.0 - distance_to_case
+        self.similarity_diameter = 1.0 - mean_diameter_distance / 1.5
         self.similarity_stenosis = 1.0 - abs(self.stenosis_degree - case_stenosis_degree) / 100.0
         self.updateSimilarityScore(diam_weight, stenosis_weight)
         if self.map_view is not None:
             self.map_view.updateScoreBars([self.similarity_shape, self.similarity_diameter, self.similarity_stenosis])
 
-    def updateSimilarityScore(self, diam_weight=0.5, stenosis_weight=0.5):
-        if not -0.0001 <= diam_weight + stenosis_weight - 1.0 <= 0.0001:
-            print("WARNING: Diameter weight", diam_weight, "and stenosis weight", stenosis_weight, "do not add to 1.")
-        self.similarity_score = diam_weight * self.similarity_diameter + stenosis_weight * self.similarity_stenosis
+    def updateSimilarityScore(self, shape_weight=1.0/3.0, diam_weight=1.0/3.0, stenosis_weight=1.0/3.0):
+        if not -0.0001 <= shape_weight + diam_weight + stenosis_weight - 1.0 <= 0.0001:
+            print("WARNING: Shape weight", shape_weight,
+                  ", diameter weight", diam_weight, 
+                  "and stenosis weight", stenosis_weight, "do not add to 1.")
+        self.similarity_score = shape_weight * self.similarity_shape \
+                                + diam_weight * self.similarity_diameter \
+                                + stenosis_weight * self.similarity_stenosis
 
 
 
@@ -132,6 +228,10 @@ class FlowCompModule(QWidget):
         self.vessel_rotations = {}
         self.vessel_translations_internal = {}
         self.vessel_rotations_internal = {}
+
+        # case-case position differences after registration
+        self.dist_mat = None           # symmetric distance matrix
+        self.dist_mat_identifiers = [] # row/column names (case identifiers)
 
         # possible scalar fields, will be mapped to surface or streamlines with active colormap
         self.active_field_name = MAP_FIELD_NAMES[0]
@@ -346,8 +446,9 @@ class FlowCompModule(QWidget):
             patient_id_lr = os.path.basename(surface_file)[:-8]
             patient_id = patient_id_lr.split('_left')[0].split('_right')[0]
             meta_path = os.path.join(self.working_dir, patient_id, "models", patient_id_lr + "_meta.txt")
+            cent_path = os.path.join(self.working_dir, patient_id, "models", patient_id_lr + "_lumen_centerlines.vtp")
             stenosis_degree = getMetaInformation(meta_path)
-            latent_space_dataset = LatentSpaceDataSet(stenosis_degree=stenosis_degree)
+            latent_space_dataset = LatentSpaceDataSet(patient_id_lr, cent_path, stenosis_degree)
 
             map_file = surface_file[:-4] + "_map_images.npz"
             if os.path.exists(map_file):
@@ -384,19 +485,34 @@ class FlowCompModule(QWidget):
         # --------------------------------------
         # Load translations and rotations
         # --------------------------------------
+        # load distance matrix
+        matrix_file = os.path.join(self.working_dir, "distMatrix.txt")
+        if os.path.exists(matrix_file):
+            self.dist_mat = np.loadtxt(matrix_file, dtype=np.float32)
+            self.dist_mat /= np.max(self.dist_mat) # normalize
+        else:
+            print("WARNING: Distance matrix could not be found.")
+        self.dist_mat_identifiers = [] # list of case identifiers, rows/colums of matrix
+
         # flow database
         self.vessel_translations = {}
         self.vessel_rotations = {}
+        self.vessel_distances = {}
         registration_file = os.path.join(self.working_dir, "TransRot.txt")
         if os.path.exists(registration_file):
             with open(registration_file) as f:
                 trans_rot = f.read().splitlines()
             for i in range(0, len(trans_rot), 3):
                 identifier = trans_rot[i]
-                translatation = trans_rot[i+1].split("t ")[1].split()
+                translation = trans_rot[i+1].split("t ")[1].split()
                 rotation = trans_rot[i+2].split("r ")[1].split()
-                self.vessel_translations[identifier] = [float(item) for item in translatation]
+                self.vessel_translations[identifier] = [float(item) for item in translation]
                 self.vessel_rotations[identifier] = [float(item) for item in rotation]
+                self.dist_mat_identifiers.append(identifier)
+
+        if len(self.dist_mat_identifiers) != self.dist_mat.shape[0]:
+            print("WARNING: Distance matrix shape", self.dist_mat.shape[0],
+                  "does not match number of cases", len(self.dist_mat_identifiers))
 
         # new patients
         self.vessel_translations_internal = {}
@@ -407,9 +523,9 @@ class FlowCompModule(QWidget):
                 trans_rot = f.read().splitlines()
             for i in range(0, len(trans_rot), 3):
                 identifier = trans_rot[i]
-                translatation = trans_rot[i+1].split("t ")[1].split()
+                translation = trans_rot[i+1].split("t ")[1].split()
                 rotation = trans_rot[i+2].split("r ")[1].split()
-                self.vessel_translations_internal[identifier] = [float(item) for item in translatation]
+                self.vessel_translations_internal[identifier] = [float(item) for item in translation]
                 self.vessel_rotations_internal[identifier] = [float(item) for item in rotation]
 
 
@@ -559,9 +675,31 @@ class FlowCompModule(QWidget):
         #########################################
         # sort the latent space
         #########################################
+        centerline_path = lumen_path[:-4] + "_centerlines.vtp"
+        diameter_profile, bifurcation_index = processCenterline(centerline_path)
+
+        try:
+            col = self.dist_mat_identifiers.index(case_identifier)
+        except:
+            col = -1
+
         # make comparisons
         for ls_dataset in self.latent_space_datasets:
-            ls_dataset.compareWithCase(case_stenosis_degree=stenosis_degree)
+            # find distance if it exists
+            try:
+                row = self.dist_mat_identifiers.index(ls_dataset.case_identifier)
+            except:
+                row = -1
+            if col != -1 and row != -1:
+                d = self.dist_mat[row, col]
+            else:
+                d = 1.0
+            # compare
+            ls_dataset.compareWithCase(
+                distance_to_case=d,
+                case_diameter_profile=diameter_profile,
+                case_bifurcation_index=bifurcation_index,
+                case_stenosis_degree=stenosis_degree)
         self.sortLatentSpace()
 
         # display maps in new order
@@ -818,11 +956,13 @@ class BarStackItem(pg.GraphicsObject):
     def generatePicture(self):
         self.picture = QtGui.QPicture()
         p = QtGui.QPainter(self.picture)
+        p.setPen(pg.mkPen(None))
         for i in range(len(self.ends)):
             p.setBrush(pg.mkBrush(self.colors[i]))
             p.drawRect(QtCore.QRectF(0.0, self.y_offset + self.thickness*(i+1), self.ends[i], self.thickness))
-        p.setBrush(pg.mkBrush(0,0,0))
+        p.setPen(pg.mkPen(0,0,0))
         p.drawRect(QtCore.QRectF(0.0, self.y_offset + self.thickness, self.x_width, 0.0))
+        p.drawRect(QtCore.QRectF(0.0, self.y_offset + self.thickness, 0.0, self.thickness * 3))
         p.end()
     
 
