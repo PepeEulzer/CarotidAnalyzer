@@ -10,6 +10,7 @@ from glob import glob
 from PyQt5.QtWidgets import (QWidget, QGridLayout, QHBoxLayout, QVBoxLayout, QLabel, QSplitter, 
     QComboBox, QCheckBox, QSizePolicy, QDoubleSpinBox, QPushButton)
 from PyQt5.QtCore import Qt, pyqtSignal
+from PyQt5.QtGui import QPalette
 from PyQt5 import QtCore, QtGui
 from vtk.qt.QVTKRenderWindowInteractor import QVTKRenderWindowInteractor
 from vtk.util.numpy_support import vtk_to_numpy
@@ -39,6 +40,10 @@ MAP_TITLE_NAMES = ['<b>Systolic Wall Shear Stress [Pa]</b>',
 
 COLORMAP_NAMES = ['Viridis', 'Cividis', 'Plasma', 'Blues']
 COLORMAP_KEYS =  ['viridis', 'cividis', 'plasma', 'CET-L12']
+
+HTML_SHAPE_COLOR = "#b3b3b3"
+HTML_DIAMETER_COLOR = "#808080"
+HTML_STENOSIS_COLOR = "#4d4d4d"
 
 
 def getVTKLookupTable(cmap, nPts=512):
@@ -403,16 +408,40 @@ class FlowCompModule(QWidget):
         # -------------------------------------
         # 2D view
         # -------------------------------------
+        # latent space legend, left to the maps
+        self.latent_space_legend = QVBoxLayout()
+        # self.latent_space_legend.setContentsMargins(0, 0, 0, 0)
+        html_string = '<font color="'+HTML_SHAPE_COLOR+'">Shape Similarity</font>'
+        self.latent_space_legend.addWidget(QLabel(html_string), alignment=Qt.AlignLeft)
+        self.latent_space_legend.addStretch(1)
+        html_string = '<font color="'+HTML_DIAMETER_COLOR+'">Diameter Similarity</font>'
+        self.latent_space_legend.addWidget(QLabel(html_string), alignment=Qt.AlignLeft)
+        self.latent_space_legend.addStretch(1)
+        html_string = '<font color="'+HTML_STENOSIS_COLOR+'">Stenosis Similarity</font>'
+        self.latent_space_legend.addWidget(QLabel(html_string), alignment=Qt.AlignLeft)
+
         # latent space view, displays the maps
         self.latent_space_widget = ScrollableGraphicsLayoutWidget()
         self.latent_space_widget.scrolled_in.connect(self.decreaseMaps)
         self.latent_space_widget.scrolled_out.connect(self.increaseMaps)
 
+        # combine legend and latent space map view
+        latent_space_layout = QHBoxLayout()
+        latent_space_layout.addLayout(self.latent_space_legend)
+        latent_space_layout.addWidget(self.latent_space_widget)
+        latent_space_layout.setContentsMargins(0, 0, 0, 0)
+        latent_space_wrapper = QWidget()
+        latent_space_wrapper.setLayout(latent_space_layout)
+        pal = QPalette()
+        pal.setColor(QPalette.Window, Qt.white)
+        latent_space_wrapper.setAutoFillBackground(True)
+        latent_space_wrapper.setPalette(pal)
+
         # 3D/latent horizontal splitter
         self.splitter_horizontal = QSplitter(self)
         self.splitter_horizontal.setOrientation(Qt.Vertical)
         self.splitter_horizontal.addWidget(self.splitter_3D)
-        self.splitter_horizontal.addWidget(self.latent_space_widget)
+        self.splitter_horizontal.addWidget(latent_space_wrapper)
         self.splitter_horizontal.setStretchFactor(0, 3)
         self.splitter_horizontal.setStretchFactor(1, 1)
 
@@ -895,7 +924,7 @@ class MapViewBox(pg.ViewBox):
         self.list_index = list_index
 
         # create internal items
-        self.bar_stack = BarStackItem(img_data.shape[0], img_data.shape[1], [1.0, 1.0, 1.0], ['r', 'g', 'b'], thickness=50.0)
+        self.bar_stack = BarStackItem(img_data.shape[0], img_data.shape[1], [1.0, 1.0, 1.0], thickness=50.0)
         self.img = pg.ImageItem(img_data)
         self.img.setLevels(levels)
         self.img.setColorMap(colormap)
@@ -937,14 +966,13 @@ class MapViewBox(pg.ViewBox):
 
 
 class BarStackItem(pg.GraphicsObject):
-    def __init__(self, y_offset, x_width, normalized_values_list, colors_list, thickness):
+    def __init__(self, y_offset, x_width, normalized_values_list, thickness):
         super().__init__()
         self.y_offset = y_offset
         self.x_width = x_width
         self.ends = np.array(normalized_values_list)[::-1] * self.x_width
         self.thickness = thickness
-        self.colors = colors_list
-        self.colors.reverse() # colors are internally ordered bottom->top
+        self.colors = [HTML_STENOSIS_COLOR, HTML_DIAMETER_COLOR, HTML_SHAPE_COLOR] # colors are internally ordered bottom->top
         self.generatePicture()
 
     
