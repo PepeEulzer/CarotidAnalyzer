@@ -10,7 +10,7 @@ from glob import glob
 from PyQt5.QtWidgets import (QWidget, QGridLayout, QHBoxLayout, QVBoxLayout, QLabel, QSplitter, 
     QComboBox, QCheckBox, QSizePolicy, QDoubleSpinBox, QPushButton)
 from PyQt5.QtCore import Qt, pyqtSignal
-from PyQt5.QtGui import QPalette
+from PyQt5.QtGui import QPalette, QColor
 from PyQt5 import QtCore, QtGui
 from vtk.qt.QVTKRenderWindowInteractor import QVTKRenderWindowInteractor
 from vtk.util.numpy_support import vtk_to_numpy
@@ -168,8 +168,7 @@ class LatentSpaceDataSet(object):
     def __lt__(self, other):
         return self.similarity_score < other.similarity_score
 
-    def compareWithCase(self, distance_to_case, case_stenosis_degree, case_diameter_profile, case_bifurcation_index,
-                        shape_weight=1.0/3.0, diam_weight=1.0/3.0, stenosis_weight=1.0/3.0):
+    def compareWithCase(self, distance_to_case, case_stenosis_degree, case_diameter_profile, case_bifurcation_index):
         if self.diameter_profile is None or case_diameter_profile is None:
             mean_diameter_distance = 1.5 # set to max
         else:
@@ -195,15 +194,17 @@ class LatentSpaceDataSet(object):
         self.similarity_shape = 1.0 - distance_to_case
         self.similarity_diameter = 1.0 - mean_diameter_distance / 1.5
         self.similarity_stenosis = 1.0 - abs(self.stenosis_degree - case_stenosis_degree) / 100.0
-        self.updateSimilarityScore(diam_weight, stenosis_weight)
         if self.map_view is not None:
             self.map_view.updateScoreBars([self.similarity_shape, self.similarity_diameter, self.similarity_stenosis])
 
-    def updateSimilarityScore(self, shape_weight=1.0/3.0, diam_weight=1.0/3.0, stenosis_weight=1.0/3.0):
-        if not -0.0001 <= shape_weight + diam_weight + stenosis_weight - 1.0 <= 0.0001:
-            print("WARNING: Shape weight", shape_weight,
-                  ", diameter weight", diam_weight, 
-                  "and stenosis weight", stenosis_weight, "do not add to 1.")
+    def updateSimilarityScore(self, shape_weight=1, diam_weight=1, stenosis_weight=1):
+        sum_weight = shape_weight + diam_weight + stenosis_weight
+        if sum_weight == 0:
+            self.similarity_score = 0
+            return
+        shape_weight /= sum_weight
+        diam_weight /= sum_weight
+        stenosis_weight /= sum_weight
         self.similarity_score = shape_weight * self.similarity_shape \
                                 + diam_weight * self.similarity_diameter \
                                 + stenosis_weight * self.similarity_stenosis
@@ -294,7 +295,6 @@ class FlowCompModule(QWidget):
         graphics_view.setCentralWidget(self.color_bar)
         graphics_view.setMinimumSize(100, 36)
         graphics_view.setMaximumSize(1000, 36)
-        graphics_view.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Maximum)
         self.levels_max_spinbox = QDoubleSpinBox()
         self.levels_max_spinbox.setSingleStep(10)
         self.levels_max_spinbox.setDecimals(1)
@@ -310,7 +310,6 @@ class FlowCompModule(QWidget):
 
         # reset selection
         self.reset_button = QPushButton("Reset selection")
-        self.reset_button.setSizePolicy(QSizePolicy.Maximum, QSizePolicy.Maximum)
         self.reset_button.clicked.connect(self.resetCompViews)
         
         # add all to toolbar (row, column, rowspan, columnspan)
@@ -410,15 +409,21 @@ class FlowCompModule(QWidget):
         # -------------------------------------
         # latent space legend, left to the maps
         self.latent_space_legend = QVBoxLayout()
-        # self.latent_space_legend.setContentsMargins(0, 0, 0, 0)
-        html_string = '<font color="'+HTML_SHAPE_COLOR+'">Shape Similarity</font>'
-        self.latent_space_legend.addWidget(QLabel(html_string), alignment=Qt.AlignLeft)
         self.latent_space_legend.addStretch(1)
-        html_string = '<font color="'+HTML_DIAMETER_COLOR+'">Diameter Similarity</font>'
-        self.latent_space_legend.addWidget(QLabel(html_string), alignment=Qt.AlignLeft)
+        self.latent_space_legend.addWidget(QLabel('<b>Comparison Metrics</b>'), alignment=Qt.AlignCenter)
+
+        self.shape_checkbox = CheckBoxDecorator("Shape Similarity", HTML_SHAPE_COLOR)
+        self.shape_checkbox.checkbox.clicked.connect(self.sortLatentSpace)
+        self.latent_space_legend.addWidget(self.shape_checkbox, alignment=Qt.AlignLeft)
+
+        self.diameter_checkbox = CheckBoxDecorator("Diameter Similarity", HTML_DIAMETER_COLOR)
+        self.diameter_checkbox.checkbox.clicked.connect(self.sortLatentSpace)
+        self.latent_space_legend.addWidget(self.diameter_checkbox, alignment=Qt.AlignLeft)
+
+        self.stenosis_checkbox = CheckBoxDecorator("Stenosis Similarity", HTML_STENOSIS_COLOR)
+        self.stenosis_checkbox.checkbox.clicked.connect(self.sortLatentSpace)
+        self.latent_space_legend.addWidget(self.stenosis_checkbox, alignment=Qt.AlignLeft)
         self.latent_space_legend.addStretch(1)
-        html_string = '<font color="'+HTML_STENOSIS_COLOR+'">Stenosis Similarity</font>'
-        self.latent_space_legend.addWidget(QLabel(html_string), alignment=Qt.AlignLeft)
 
         # latent space view, displays the maps
         self.latent_space_widget = ScrollableGraphicsLayoutWidget()
@@ -432,10 +437,6 @@ class FlowCompModule(QWidget):
         latent_space_layout.setContentsMargins(0, 0, 0, 0)
         latent_space_wrapper = QWidget()
         latent_space_wrapper.setLayout(latent_space_layout)
-        pal = QPalette()
-        pal.setColor(QPalette.Window, Qt.white)
-        latent_space_wrapper.setAutoFillBackground(True)
-        latent_space_wrapper.setPalette(pal)
 
         # 3D/latent horizontal splitter
         self.splitter_horizontal = QSplitter(self)
@@ -641,7 +642,7 @@ class FlowCompModule(QWidget):
         # render all comparison views
         self.comp_patient_view.GetRenderWindow().Render()
 
-
+    
     def loadPatient(self, patient_dict):
         self.active_patient_dict = patient_dict
         patient_id = self.active_patient_dict['patient_ID']
@@ -731,20 +732,29 @@ class FlowCompModule(QWidget):
                 case_stenosis_degree=stenosis_degree)
         self.sortLatentSpace()
 
-        # display maps in new order
-        self.latent_space_widget.clear()
-        for i in range(self.nr_latent_space_items):
-            self.latent_space_widget.addItem(self.latent_space_datasets[i].map_view, row=0, col=i)
-
-
     
     def sortLatentSpace(self):
+        # update the score values
+        shape_w    = 1 if self.shape_checkbox.checkbox.isChecked() else 0
+        diam_w     = 1 if self.diameter_checkbox.checkbox.isChecked() else 0
+        stenosis_w = 1 if self.stenosis_checkbox.checkbox.isChecked() else 0
+        for ls_dataset in self.latent_space_datasets:
+            ls_dataset.updateSimilarityScore(shape_weight=shape_w, diam_weight=diam_w, stenosis_weight=stenosis_w)
+
+        # sort the internal datasets
         self.latent_space_datasets = sorted(self.latent_space_datasets, reverse=True)
+
+        # update the ids
         self.active_map_ids.clear()
         for index, ls_dataset in enumerate(self.latent_space_datasets):
             ls_dataset.map_view.list_index = index # will be returned on click
             if ls_dataset.is_clicked:
                 self.active_map_ids.append(index)
+
+        # display maps in new order
+        self.latent_space_widget.clear()
+        for i in range(self.nr_latent_space_items):
+            self.latent_space_widget.addItem(self.latent_space_datasets[i].map_view, row=0, col=i)
 
     
     def getLevels(self):
@@ -871,6 +881,7 @@ class FlowCompModule(QWidget):
     def resetCompViews(self):
         # delete active 3D views of selected maps
         for id in self.active_map_ids:
+            self.latent_space_datasets[id].is_clicked = False
             self.latent_space_datasets[id].map_view.setActivated(False)
         self.active_map_ids.clear()
         for c in self.comp_patient_containers:
@@ -1150,3 +1161,22 @@ class VerticalLine(QFrame):
         super(VerticalLine, self).__init__()
         self.setFrameShape(QFrame.VLine)
         self.setFrameShadow(QFrame.Sunken)
+
+
+
+class CheckBoxDecorator(QWidget):
+    def __init__(self, text, color):
+        super(CheckBoxDecorator, self).__init__()
+        self.checkbox = QCheckBox()
+        self.checkbox.setChecked(True)
+        self.label = QLabel('<font color="#FFFFFF">'+text+'</font>')
+        l = QHBoxLayout()
+        l.addWidget(self.checkbox)
+        l.addWidget(self.label)
+        l.addStretch(1)
+        self.setLayout(l)
+        pal = QPalette()
+        pal.setColor(QPalette.Window, QColor(color))
+        self.setAutoFillBackground(True)
+        self.setPalette(pal)
+        self.setMinimumWidth(191) # ensures same width on all boxes
