@@ -45,6 +45,13 @@ HTML_SHAPE_COLOR = "#b3b3b3"
 HTML_DIAMETER_COLOR = "#808080"
 HTML_STENOSIS_COLOR = "#4d4d4d"
 
+LANDMARK_ALPHA = 20 * np.pi / 180 # angle (rad) for default ACI-ACE layout
+LANDMARK_RANGE = 15 # distance (mm) from bifurcation point for automatic landmarks
+LANDMARK_TARGETS = vtk.vtkPoints()
+LANDMARK_TARGETS.InsertNextPoint([0, 0, -LANDMARK_RANGE]) # ACC
+LANDMARK_TARGETS.InsertNextPoint([-LANDMARK_RANGE*np.sin(LANDMARK_ALPHA), 0, LANDMARK_RANGE*np.cos(LANDMARK_ALPHA)]) # ACI
+LANDMARK_TARGETS.InsertNextPoint([LANDMARK_RANGE*np.sin(LANDMARK_ALPHA), 0, LANDMARK_RANGE*np.cos(LANDMARK_ALPHA)]) # ACE
+
 
 def getVTKLookupTable(cmap, nPts=512):
     # returns a vtkLookupTable from any given pyqtgraph colormap
@@ -70,12 +77,23 @@ def getMetaInformation(meta_path):
 
 
 def processCenterline(centerline_path):
-    # returns centerline radii of ACC/ACI branch and the index of the bifurcation point
+    """
+    Loads a centerline and extracts relevant information.
+    Returns:
+    * centerline radii of ACC/ACI branch (np.array)
+    * index of the bifurcation point
+    * ACC landmark coordinates (10mm before bifurcation)
+    * ACI landmark coordinates (10mm after bifurcation)
+    * ACE landmark coordinates (10mm after bifurcation)
+    """
     radii_array = None
     bifurcation_index = 0
+    landmark_ACC = (0, 0, 0)
+    landmark_bifurcation = (0, 0, 0)
+    landmark_ACI = (0, 0, 0)
 
     if not os.path.exists(centerline_path):
-        return radii_array, bifurcation_index
+        return radii_array, bifurcation_index, landmark_ACC, landmark_bifurcation, landmark_ACI
 
     reader = vtk.vtkXMLPolyDataReader()
     reader.SetFileName(centerline_path)
@@ -84,8 +102,9 @@ def processCenterline(centerline_path):
     radii_flat = centerlines.GetPointData().GetArray('MaximumInscribedSphereRadius')
 
     if centerlines.GetLines().GetNumberOfCells() < 2:
-        return radii_array, bifurcation_index
+        return radii_array, bifurcation_index, landmark_ACC, landmark_bifurcation, landmark_ACI
 
+    # --------------------------------
     # iterate the first line (ACC/ACI)
     l = centerlines.GetLines()
     l.InitTraversal()
@@ -98,10 +117,10 @@ def processCenterline(centerline_path):
     p = vtk_to_numpy(points.GetData())
 
     # calculate arc len (x-axis)
-    # arc = p - np.roll(p, 1, axis=0)
-    # arc = np.sqrt((arc*arc).sum(axis=1))
-    # arc[0] = 0
-    # arc = np.cumsum(arc)
+    arc = p - np.roll(p, 1, axis=0)
+    arc = np.sqrt((arc*arc).sum(axis=1))
+    arc[0] = 0
+    arc = np.cumsum(arc)
 
     # retrieve radius data (y-axis)
     radii = vtk.vtkDoubleArray()
@@ -109,12 +128,19 @@ def processCenterline(centerline_path):
     radii_flat.GetTuples(pointIds, radii)
     radii_array = vtk_to_numpy(radii)
 
+    # --------------------------------
     # iterate second line (ACC/ACE)
     pointIds = vtk.vtkIdList()
     l.GetNextCell(pointIds)
     points2 = vtk.vtkPoints()
     centerlines.GetPoints().GetPoints(pointIds, points2)
     p2 = vtk_to_numpy(points2.GetData())
+
+    # calculate ACE arc len
+    arc2 = p2 - np.roll(p2, 1, axis=0)
+    arc2 = np.sqrt((arc2*arc2).sum(axis=1))
+    arc2[0] = 0
+    arc2 = np.cumsum(arc2)
 
     # find last overlap index
     len1 = p.shape[0]
@@ -126,8 +152,15 @@ def processCenterline(centerline_path):
     overlap_mask = np.all(overlap_mask, axis=1) # AND over tuples
     bifurcation_index = np.searchsorted(overlap_mask, True) # first position where lines diverge
 
+    # --------------------------------
+    # retrieve landmarks around bifurcation
+    bifurcation_arclen = arc[bifurcation_index]
+    landmark_ACC = p[np.argmax(arc > bifurcation_arclen - LANDMARK_RANGE)]
+    landmark_ACI = p[np.argmax(arc > bifurcation_arclen + LANDMARK_RANGE)]
+    landmark_ACE = p2[np.argmax(arc2 > bifurcation_arclen + LANDMARK_RANGE)]
+
     # TODO radii array is not equidistant
-    return radii_array, bifurcation_index
+    return radii_array, bifurcation_index, landmark_ACC, landmark_ACI, landmark_ACE
 
 
 
@@ -148,6 +181,11 @@ class LatentSpaceDataSet(object):
     systolic_streamline_path = None  # path to systolic streamlines, if exists (systolic.vtp)
     diastolic_streamline_path = None # path to diastolic streamlines, if exists (diastolic.vtp)
 
+    # landmarks for registration (automatically extracted)
+    landmark_ACC = None
+    landmark_ACI = None
+    landmark_ACE = None
+
     # similarity variables
     diameter_profile = None   # np.array of ACC/ACI diameters, equidistantly spaced
     bifurcation_index = 0     # index into diameter profile for registering at bifurcation
@@ -159,7 +197,8 @@ class LatentSpaceDataSet(object):
 
     def __init__(self, case_id, centerline_path, stenosis_degree):
         self.case_identifier = case_id
-        self.diameter_profile, self.bifurcation_index = processCenterline(centerline_path)
+        self.diameter_profile, self.bifurcation_index, \
+            self.landmark_ACC, self.landmark_ACI, self.landmark_ACE = processCenterline(centerline_path)
         self.stenosis_degree = stenosis_degree
 
     def __eq__(self, other):
@@ -369,13 +408,10 @@ class FlowCompModule(QWidget):
         normals_plaque.SplittingOff()
         normals_plaque.SetInputConnection(self.active_patient_reader_plaque.GetOutputPort())
 
-        self.active_patient_transform = vtk.vtkTransform()
         self.transform_filter_lumen = vtk.vtkTransformFilter()
         self.transform_filter_lumen.SetInputConnection(normals_lumen.GetOutputPort())
-        self.transform_filter_lumen.SetTransform(self.active_patient_transform)
         self.transform_filter_plaque = vtk.vtkTransformFilter()
         self.transform_filter_plaque.SetInputConnection(normals_plaque.GetOutputPort())
-        self.transform_filter_plaque.SetTransform(self.active_patient_transform)
 
         self.active_patient_mapper_lumen = vtk.vtkPolyDataMapper()
         self.active_patient_mapper_plaque = vtk.vtkPolyDataMapper()
@@ -601,7 +637,8 @@ class FlowCompModule(QWidget):
                 stream_sys_path=ls_dataset.systolic_streamline_path,
                 stream_dia_path=ls_dataset.diastolic_streamline_path,
                 trans=translation,
-                rot=rotation
+                rot=rotation,
+                landmarks=[ls_dataset.landmark_ACC, ls_dataset.landmark_ACI, ls_dataset.landmark_ACE]
                 )
             if self.link_cam_checkbox.isChecked():
                 container.useLinkedCamera(self.active_patient_camera)
@@ -681,7 +718,22 @@ class FlowCompModule(QWidget):
         else:
             self.active_patient_renderer.RemoveActor(self.active_patient_actor_plaque)
 
-        # load and apply transform
+        # transform from automatic landmarks
+        centerline_path = lumen_path[:-4] + "_centerlines.vtp"
+        diameter_profile, bifurcation_index, landmark_ACC, landmark_ACI, landmark_ACE = processCenterline(centerline_path)
+
+        source_points = vtk.vtkPoints()
+        source_points.InsertNextPoint(landmark_ACC)
+        source_points.InsertNextPoint(landmark_ACI)
+        source_points.InsertNextPoint(landmark_ACE)
+
+        transform = vtk.vtkLandmarkTransform()
+        transform.SetSourceLandmarks(source_points)
+        transform.SetTargetLandmarks(LANDMARK_TARGETS)
+        transform.SetModeToRigidBody()
+
+        """
+        # transform from rotation/translation
         rotation_mat = np.eye(4)
         translation_mat = np.eye(4)
         try:
@@ -693,7 +745,12 @@ class FlowCompModule(QWidget):
             print("Warning: No translation/rotation found for", case_identifier)
         transform_mat = rotation_mat @ translation_mat # translate, then rotate
         transform_mat = transform_mat.flatten(order='C') # row-wise input for vtk
-        self.active_patient_transform.SetMatrix(transform_mat)
+        transform = vtk.vtkTransform()
+        transform.SetMatrix(transform_mat)
+        """
+
+        self.transform_filter_lumen.SetTransform(transform)
+        self.transform_filter_plaque.SetTransform(transform)
 
         # reset camera
         self.active_patient_camera.SetPosition(0, 0, -100)
@@ -705,8 +762,6 @@ class FlowCompModule(QWidget):
         #########################################
         # sort the latent space
         #########################################
-        centerline_path = lumen_path[:-4] + "_centerlines.vtp"
-        diameter_profile, bifurcation_index = processCenterline(centerline_path)
 
         try:
             col = self.dist_mat_identifiers.index(case_identifier)
@@ -1020,7 +1075,7 @@ class LatentSpace3DContainer():
     of one comparison case.
     """
     def __init__(self, surface_file_path, active_field_name, scale_min, scale_max, lut, stenosis_degree,
-                 stream_sys_path=None, stream_dia_path=None, trans=None, rot=None):
+                 stream_sys_path=None, stream_dia_path=None, trans=None, rot=None, landmarks=None):
         # id text
         self.stenosis_degree_str = "\n" + str(stenosis_degree) + "% Stenosis"
         self.identifier_text = vtk.vtkTextActor()
@@ -1029,17 +1084,32 @@ class LatentSpace3DContainer():
         p.SetFontSize(20)
         p.SetBackgroundColor(1, 1, 1)
 
-        # create transform for 3D objects
-        rotation_mat = np.eye(4)
-        if rot is not None:
-            rotation_mat[0:3, 0:3] = np.reshape(rot, (3,3), order='F') # matrix is given column-wise
-        translation_mat = np.eye(4)
-        if trans is not None:
-            translation_mat[0:3, 3] = np.array(trans)
-        transform_mat = rotation_mat @ translation_mat # translate, then rotate
-        transform_mat = transform_mat.flatten(order='C') # row-wise input for vtk
-        transform = vtk.vtkTransform()
-        transform.SetMatrix(transform_mat)
+        if landmarks is None and trans is not None and rot is not None:
+            # create transform for 3D objects from translation/rotation
+            rotation_mat = np.eye(4)
+            if rot is not None:
+                rotation_mat[0:3, 0:3] = np.reshape(rot, (3,3), order='F') # matrix is given column-wise
+            translation_mat = np.eye(4)
+            if trans is not None:
+                translation_mat[0:3, 3] = np.array(trans)
+            transform_mat = rotation_mat @ translation_mat # translate, then rotate
+            transform_mat = transform_mat.flatten(order='C') # row-wise input for vtk
+            transform = vtk.vtkTransform()
+            transform.SetMatrix(transform_mat)
+        elif landmarks is not None:
+            # create transform for 3D objects from landmarks (preferred)
+            source_points = vtk.vtkPoints()
+            source_points.InsertNextPoint(landmarks[0]) # ACC
+            source_points.InsertNextPoint(landmarks[1]) # ACI
+            source_points.InsertNextPoint(landmarks[2]) # ACE
+
+            transform = vtk.vtkLandmarkTransform()
+            transform.SetSourceLandmarks(source_points)
+            transform.SetTargetLandmarks(LANDMARK_TARGETS)
+            transform.SetModeToRigidBody()
+        else:
+            # no transform
+            transform = vtk.vtkTransform()
 
         # surface
         reader = vtk.vtkXMLUnstructuredGridReader()
