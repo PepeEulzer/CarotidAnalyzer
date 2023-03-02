@@ -102,7 +102,7 @@ class CarotidAnalyzer(QMainWindow, Ui_MainWindow):
         # if geometry:
         #     self.restoreGeometry(geometry)
         dir = settings.value("LastWorkingDir")
-        if dir != None:
+        if dir != None and os.path.exists(dir):
             self.setWorkingDir(dir)
  
     

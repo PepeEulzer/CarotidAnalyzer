@@ -275,7 +275,7 @@ class FlowCompModule(QWidget):
         self.vessel_rotations_internal = {}
 
         # case-case position differences after registration
-        self.dist_mat = None           # symmetric distance matrix
+        self.dist_mat = np.array([])   # symmetric distance matrix
         self.dist_mat_identifiers = [] # row/column names (case identifiers)
 
         # possible scalar fields, will be mapped to surface or streamlines with active colormap
@@ -696,6 +696,9 @@ class FlowCompModule(QWidget):
             case_identifier = patient_id + "_right"
             lumen_path = self.active_patient_dict['lumen_model_right']
             plaque_path = self.active_patient_dict['plaque_model_right']
+
+        if not lumen_path:
+            return
 
         # get stenosis degree of new case
         meta_path = lumen_path[:-9] + "meta.txt"
