@@ -14,6 +14,7 @@ from PyQt5.QtGui import QPalette, QColor
 from PyQt5 import QtCore, QtGui
 from vtk.qt.QVTKRenderWindowInteractor import QVTKRenderWindowInteractor
 from vtk.util.numpy_support import vtk_to_numpy
+from scipy.interpolate import interp1d
 
 from defaults import *
 
@@ -128,6 +129,11 @@ def processCenterline(centerline_path):
     radii_flat.GetTuples(pointIds, radii)
     radii_array = vtk_to_numpy(radii)
 
+    # resample equidistant radii
+    resample = interp1d(arc, radii, assume_sorted=True)
+    x_samples = np.arange(0, arc[-1], 0.1) # must use same stepwidth (e.g. 0.1mm) for all arrays!
+    radii_array_resampled = resample(x_samples)
+
     # --------------------------------
     # iterate second line (ACC/ACE)
     pointIds = vtk.vtkIdList()
@@ -159,8 +165,9 @@ def processCenterline(centerline_path):
     landmark_ACI = p[np.argmax(arc > bifurcation_arclen + LANDMARK_RANGE)]
     landmark_ACE = p2[np.argmax(arc2 > bifurcation_arclen + LANDMARK_RANGE)]
 
-    # TODO radii array is not equidistant
-    return radii_array, bifurcation_index, landmark_ACC, landmark_ACI, landmark_ACE
+    # compute the correct bifurcation index for the resampled radii array
+    bifurcation_index_resampled = np.searchsorted(x_samples >= bifurcation_arclen, True)
+    return radii_array_resampled, bifurcation_index_resampled, landmark_ACC, landmark_ACI, landmark_ACE
 
 
 
@@ -512,7 +519,8 @@ class FlowCompModule(QWidget):
             patient_id_lr = os.path.basename(surface_file)[:-8]
             patient_id = patient_id_lr.split('_left')[0].split('_right')[0]
             meta_path = os.path.join(self.working_dir, patient_id, "models", patient_id_lr + "_meta.txt")
-            cent_path = os.path.join(self.working_dir, patient_id, "models", patient_id_lr + "_lumen_centerlines.vtp")
+            # cent_path = os.path.join(self.working_dir, patient_id, "models", patient_id_lr + "_lumen_centerlines.vtp")
+            cent_path = surface_file.split("wss.vtu")[0] + "lumen_centerlines.vtp"
             stenosis_degree = getMetaInformation(meta_path)
             latent_space_dataset = LatentSpaceDataSet(patient_id_lr, cent_path, stenosis_degree)
 
