@@ -273,6 +273,8 @@ class FlowCompModule(QWidget):
         self.latent_space_datasets = []
         self.active_map_ids = []          # indices into above list, indicate active (clicked) cases
         self.comp_patient_containers = [] # LatentSpace3DContainer of all active 3D views
+        self.nr_map_rows = 0 # will be filled later
+        self.nr_map_cols = 0
         self.nr_latent_space_items = INITIAL_NR_MAPS
 
         # translation and rotation dicts for cases, key is the patient id (+ left/right)
@@ -470,6 +472,7 @@ class FlowCompModule(QWidget):
 
         # latent space view, displays the maps
         self.latent_space_widget = ScrollableGraphicsLayoutWidget()
+        self.latent_space_widget.sigDeviceTransformChanged.connect(lambda: self.fillMapView(0, False))
         self.latent_space_widget.scrolled_in.connect(self.decreaseMaps)
         self.latent_space_widget.scrolled_out.connect(self.increaseMaps)
 
@@ -519,7 +522,6 @@ class FlowCompModule(QWidget):
             patient_id_lr = os.path.basename(surface_file)[:-8]
             patient_id = patient_id_lr.split('_left')[0].split('_right')[0]
             meta_path = os.path.join(self.working_dir, patient_id, "models", patient_id_lr + "_meta.txt")
-            # cent_path = os.path.join(self.working_dir, patient_id, "models", patient_id_lr + "_lumen_centerlines.vtp")
             cent_path = surface_file.split("wss.vtu")[0] + "lumen_centerlines.vtp"
             stenosis_degree = getMetaInformation(meta_path)
             latent_space_dataset = LatentSpaceDataSet(patient_id_lr, cent_path, stenosis_degree)
@@ -551,10 +553,8 @@ class FlowCompModule(QWidget):
             map_view.clicked[int].connect(self.mapClicked)
             dataset.map_view = map_view
 
-        # initial latent space view, unsorted
+        # initial latent space view, unsorted, will be filled automatically
         self.nr_latent_space_items = min(INITIAL_NR_MAPS, len(self.latent_space_datasets))
-        for i in range(self.nr_latent_space_items):
-            self.latent_space_widget.addItem(self.latent_space_datasets[i].map_view, row=0, col=i)
 
         # --------------------------------------
         # Load translations and rotations
@@ -602,19 +602,40 @@ class FlowCompModule(QWidget):
                 self.vessel_translations_internal[identifier] = [float(item) for item in translation]
                 self.vessel_rotations_internal[identifier] = [float(item) for item in rotation]
 
+    
+    def fillMapView(self, nr_items_change=0, force_reload=False):
+        self.nr_latent_space_items += nr_items_change
+        container_w = self.latent_space_widget.size().width()
+        container_h = self.latent_space_widget.size().height()
+        nr_rows = 1
+        nr_cols = self.nr_latent_space_items
+        element_w = container_w / nr_cols
+        element_h = 2 * element_w
+        while element_h * 2 <= container_h:
+            nr_rows += 1
+            nr_cols = np.ceil(self.nr_latent_space_items / nr_rows)
+            element_w = container_w / nr_cols
+            element_h = 2 * element_w
+
+        # clear the container and apply the layout (only if something changed)
+        if force_reload or self.nr_map_rows != nr_rows or self.nr_map_cols != nr_cols:
+            self.nr_map_rows = nr_rows
+            self.nr_map_cols = nr_cols
+            self.latent_space_widget.clear()
+            for i in range(self.nr_latent_space_items):
+                row = int(i / nr_cols)
+                col = int(i % nr_cols)
+                self.latent_space_widget.addItem(self.latent_space_datasets[i].map_view, row=row, col=col)
+
 
     def increaseMaps(self):
         if self.nr_latent_space_items < len(self.latent_space_datasets)-1:
-            map_view = self.latent_space_datasets[self.nr_latent_space_items].map_view
-            self.latent_space_widget.addItem(map_view, row=0, col=self.nr_latent_space_items)
-            self.nr_latent_space_items += 1
+            self.fillMapView(nr_items_change=1)
     
 
     def decreaseMaps(self):
         if self.nr_latent_space_items > 1:
-            self.nr_latent_space_items -= 1
-            map_view = self.latent_space_datasets[self.nr_latent_space_items].map_view
-            self.latent_space_widget.removeItem(map_view)
+            self.fillMapView(nr_items_change=-1)
 
 
     def mapClicked(self, index):
@@ -818,10 +839,8 @@ class FlowCompModule(QWidget):
                 self.active_map_ids.append(index)
 
         # display maps in new order
-        self.latent_space_widget.clear()
-        for i in range(self.nr_latent_space_items):
-            self.latent_space_widget.addItem(self.latent_space_datasets[i].map_view, row=0, col=i)
-
+        self.fillMapView(force_reload=True)
+            
     
     def getLevels(self):
         return (self.map_scale_min[self.active_field_name], self.map_scale_max[self.active_field_name])
