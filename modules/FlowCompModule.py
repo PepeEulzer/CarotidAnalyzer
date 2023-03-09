@@ -53,6 +53,8 @@ LANDMARK_TARGETS.InsertNextPoint([0, 0, -LANDMARK_RANGE]) # ACC
 LANDMARK_TARGETS.InsertNextPoint([-LANDMARK_RANGE*np.sin(LANDMARK_ALPHA), 0, LANDMARK_RANGE*np.cos(LANDMARK_ALPHA)]) # ACI
 LANDMARK_TARGETS.InsertNextPoint([LANDMARK_RANGE*np.sin(LANDMARK_ALPHA), 0, LANDMARK_RANGE*np.cos(LANDMARK_ALPHA)]) # ACE
 
+STREAMLINE_CLUSTER_SIZES = ["30", "10"] # nr of cascaded streamline clusters
+
 
 def getVTKLookupTable(cmap, nPts=512):
     # returns a vtkLookupTable from any given pyqtgraph colormap
@@ -187,6 +189,8 @@ class LatentSpaceDataSet(object):
     surface_dataset_path = None      # path to surface file in flow folder, if exists (wss.vtu)
     systolic_streamline_path = None  # path to systolic streamlines, if exists (systolic.vtp)
     diastolic_streamline_path = None # path to diastolic streamlines, if exists (diastolic.vtp)
+    systolic_cluster_ids = []        # list of vtkIdList objects that contain cascaded cluster ids (many to few)
+    diastolic_cluster_ids = []       # same as above for diastolic timestep
 
     # landmarks for registration (automatically extracted)
     landmark_ACC = None
@@ -516,7 +520,7 @@ class FlowCompModule(QWidget):
 
         # load latent space cases
         self.latent_space_datasets.clear()
-        surface_file_pattern = os.path.join(self.working_dir, "flow_wall_data", "patient*_wss.vtu")
+        surface_file_pattern = os.path.join(self.working_dir, "flow_data", "patient*_wss.vtu")
         for surface_file in glob(surface_file_pattern):
             # if map and surface file exist -> create a case
             patient_id_lr = os.path.basename(surface_file)[:-8]
@@ -542,6 +546,34 @@ class FlowCompModule(QWidget):
             diastolic_streamline_file = surface_file[:-7] + "velocity_diastolic.vtp"
             if os.path.exists(diastolic_streamline_file):
                 latent_space_dataset.diastolic_streamline_path = diastolic_streamline_file
+
+            # load cluster id lists
+            for cluster_size in STREAMLINE_CLUSTER_SIZES:
+                systolic_cluster_file = os.path.join(self.working_dir, 
+                                                     "flow_data",
+                                                     "cluster_" + cluster_size,
+                                                     patient_id_lr + "_velocity_systolic_representatives.txt")
+                if os.path.exists(systolic_cluster_file):
+                    cluster_ids = np.loadtxt(systolic_cluster_file, dtype=np.int32).tolist()
+                    id_list = vtk.vtkIdList()
+                    for cluster_id in cluster_ids:
+                        id_list.InsertNextId(cluster_id)
+                    latent_space_dataset.systolic_cluster_ids.append(id_list)
+                else:
+                    latent_space_dataset.systolic_cluster_ids.append(None) # indicate missing entry
+
+                diastolic_cluster_file = os.path.join(self.working_dir, 
+                                                     "flow_data",
+                                                     "cluster_" + cluster_size,
+                                                     patient_id_lr + "_velocity_diastolic_representatives.txt")
+                if os.path.exists(diastolic_cluster_file):
+                    cluster_ids = np.loadtxt(diastolic_cluster_file, dtype=np.int32).tolist()
+                    id_list = vtk.vtkIdList()
+                    for cluster_id in cluster_ids:
+                        id_list.InsertNextId(cluster_id)
+                    latent_space_dataset.diastolic_cluster_ids.append(id_list)
+                else:
+                    latent_space_dataset.diastolic_cluster_ids.append(None) # indicate missing entry
 
             self.latent_space_datasets.append(latent_space_dataset)
 
@@ -665,6 +697,7 @@ class FlowCompModule(QWidget):
                 stenosis_degree=ls_dataset.stenosis_degree,
                 stream_sys_path=ls_dataset.systolic_streamline_path,
                 stream_dia_path=ls_dataset.diastolic_streamline_path,
+                stream_cluster_ids=ls_dataset.systolic_cluster_ids[0], # TODO choose correct level of detail
                 trans=translation,
                 rot=rotation,
                 landmarks=[ls_dataset.landmark_ACC, ls_dataset.landmark_ACI, ls_dataset.landmark_ACE]
@@ -1105,7 +1138,7 @@ class LatentSpace3DContainer():
     of one comparison case.
     """
     def __init__(self, surface_file_path, active_field_name, scale_min, scale_max, lut, stenosis_degree,
-                 stream_sys_path=None, stream_dia_path=None, trans=None, rot=None, landmarks=None):
+                 stream_sys_path=None, stream_dia_path=None, stream_cluster_ids=None, trans=None, rot=None, landmarks=None):
         # id text
         self.stenosis_degree_str = "\n" + str(stenosis_degree) + "% Stenosis"
         self.identifier_text = vtk.vtkTextActor()
@@ -1188,8 +1221,11 @@ class LatentSpace3DContainer():
         self.streamlines_transform_filter = vtk.vtkTransformFilter()
         self.streamlines_transform_filter.SetInputData(self.streamlines_systolic)
         self.streamlines_transform_filter.SetTransform(transform)
+
         self.streamlines_mapper = vtk.vtkDataSetMapper()
-        self.streamlines_mapper.SetInputConnection(self.streamlines_transform_filter.GetOutputPort())
+        self.streamlines_cell_extractor = vtk.vtkExtractCells()
+        self.setStreamlineClusters(stream_cluster_ids)
+
         self.streamlines_mapper.SetScalarRange(scale_min, scale_max)
         self.streamlines_mapper.SetLookupTable(lut)
         self.streamlines_actor = vtk.vtkActor()
@@ -1231,6 +1267,15 @@ class LatentSpace3DContainer():
         self.streamlines_transform_filter.Update()
         self.streamlines_mapper.SetScalarRange(levels)
         self.renderer.AddActor(self.streamlines_actor)
+
+    def setStreamlineClusters(self, stream_cluster_ids):
+        if stream_cluster_ids is None:
+            # no clustering
+            self.streamlines_mapper.SetInputConnection(self.streamlines_transform_filter.GetOutputPort())
+        else:
+            self.streamlines_cell_extractor.SetInputConnection(self.streamlines_transform_filter.GetOutputPort())
+            self.streamlines_cell_extractor.SetCellList(stream_cluster_ids)
+            self.streamlines_mapper.SetInputConnection(self.streamlines_cell_extractor.GetOutputPort())
 
     def setViewSurface(self, field_name, levels):
         self.surface.GetPointData().SetActiveScalars(field_name)
