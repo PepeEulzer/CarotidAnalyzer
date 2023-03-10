@@ -673,7 +673,6 @@ class FlowCompModule(QWidget):
 
     def mapClicked(self, index):
         ls_dataset = self.latent_space_datasets[index]
-        print("Loading", ls_dataset.surface_dataset_path)
         if index not in self.active_map_ids:
             # box is new -> activate
             self.active_map_ids.append(index)
@@ -1241,6 +1240,14 @@ class LatentSpace3DContainer():
             reader.Update()
             self.streamlines_systolic = reader.GetOutput()
             self.streamlines_systolic.GetPointData().SetActiveScalars('velocity_systolic_mag')
+
+            # streamline_lengths = [self.streamlines_systolic.GetCell(i).GetNumberOfPoints() for i in range(self.streamlines_systolic.GetNumberOfCells())]
+            # streamline_lengths = np.array(streamline_lengths, dtype=np.int32)
+            # streamline_indices_by_len = np.argsort(streamline_lengths)[::-1]
+            # self.id_list = vtk.vtkIdList()
+            # for cluster_id in streamline_indices_by_len[:20]:
+            #     self.id_list.InsertNextId(cluster_id)
+
         else:
             self.streamlines_systolic = vtk.vtkPolyData()
 
@@ -1311,6 +1318,7 @@ class LatentSpace3DContainer():
         else:
             self.streamlines_cell_extractor.SetInputConnection(self.streamlines_transform_filter.GetOutputPort())
             self.streamlines_cell_extractor.SetCellList(stream_cluster_ids)
+            # self.streamlines_cell_extractor.SetCellList(self.id_list)
             self.streamlines_mapper.SetInputConnection(self.streamlines_cell_extractor.GetOutputPort())
             self.streamlines_actor.GetProperty().SetLineWidth(6)
 
