@@ -26,11 +26,11 @@ MAP_FIELD_NAMES = ['WSS_systolic',
                    'velocity_diastolic']
 
 MAP_DISPLAY_NAMES = ['Systolic WSS',
-                   'Diastolic WSS',
-                   'Systolic Backflow',
-                   'Diastolic Backflow',
-                   'Systolic Velocity',
-                   'Diastolic Velocity']
+                     'Diastolic WSS',
+                     'Systolic Backflow',
+                     'Diastolic Backflow',
+                     'Systolic Velocity',
+                     'Diastolic Velocity']
 
 MAP_TITLE_NAMES = ['<b>Systolic Wall Shear Stress [Pa]</b>',
                    '<b>Diastolic Wall Shear Stress [Pa]</b>',
@@ -42,9 +42,9 @@ MAP_TITLE_NAMES = ['<b>Systolic Wall Shear Stress [Pa]</b>',
 COLORMAP_NAMES = ['Viridis', 'Cividis', 'Plasma', 'Blues']
 COLORMAP_KEYS =  ['viridis', 'cividis', 'plasma', 'CET-L12']
 
-HTML_SHAPE_COLOR = "#b3b3b3"
-HTML_DIAMETER_COLOR = "#808080"
-HTML_STENOSIS_COLOR = "#4d4d4d"
+HTML_SHAPE_COLOR = "#c6dbef"
+HTML_DIAMETER_COLOR = "#9ecae1"
+HTML_STENOSIS_COLOR = "#6baed6"
 
 LANDMARK_ALPHA = 20 * np.pi / 180 # angle (rad) for default ACI-ACE layout
 LANDMARK_RANGE = 15 # distance (mm) from bifurcation point for automatic landmarks
@@ -322,6 +322,7 @@ class FlowCompModule(QWidget):
         
         # set active colormap + range
         self.cmap = pg.colormap.get('viridis')
+        self.cmap.reverse()
         self.vtk_lut = getVTKLookupTable(self.cmap)
         self.colormap_combobox = QComboBox()
         self.colormap_combobox.addItems(COLORMAP_NAMES)
@@ -435,7 +436,7 @@ class FlowCompModule(QWidget):
         self.active_patient_actor_plaque = vtk.vtkActor()
         self.active_patient_actor_lumen.SetMapper(self.active_patient_mapper_lumen)
         self.active_patient_actor_plaque.SetMapper(self.active_patient_mapper_plaque)
-        self.active_patient_actor_lumen.GetProperty().SetColor(COLOR_LUMEN)
+        # self.active_patient_actor_lumen.GetProperty().SetColor(COLOR_LUMEN)
         self.active_patient_actor_plaque.GetProperty().SetColor(COLOR_PLAQUE)
         self.active_patient_actor_plaque.GetProperty().SetOpacity(0.5)
         self.active_patient_actor_plaque.GetProperty().BackfaceCullingOn()
@@ -672,6 +673,7 @@ class FlowCompModule(QWidget):
 
     def mapClicked(self, index):
         ls_dataset = self.latent_space_datasets[index]
+        print("Loading", ls_dataset.surface_dataset_path)
         if index not in self.active_map_ids:
             # box is new -> activate
             self.active_map_ids.append(index)
@@ -697,7 +699,7 @@ class FlowCompModule(QWidget):
                 stenosis_degree=ls_dataset.stenosis_degree,
                 stream_sys_path=ls_dataset.systolic_streamline_path,
                 stream_dia_path=ls_dataset.diastolic_streamline_path,
-                stream_cluster_ids=ls_dataset.systolic_cluster_ids[0], # TODO choose correct level of detail
+                stream_cluster_ids=None,
                 trans=translation,
                 rot=rotation,
                 landmarks=[ls_dataset.landmark_ACC, ls_dataset.landmark_ACI, ls_dataset.landmark_ACE]
@@ -737,9 +739,40 @@ class FlowCompModule(QWidget):
                 self.comp_patient_containers[i].setIdText(i+1, True)
             else:
                 self.comp_patient_containers[i].setIdText(i+1, False)
+        
+        # update streamlines level of detail
+        self.updateStreamlineClusterSize()
 
         # render all comparison views
         self.comp_patient_view.GetRenderWindow().Render()
+
+    
+    def setStreamlineClusterSize(self, size_id):
+        if "sys" in self.active_field_name:
+            for index, map_id in enumerate(self.active_map_ids):
+                cluster_ids = self.latent_space_datasets[map_id].systolic_cluster_ids[size_id]
+                self.comp_patient_containers[index].setStreamlineClusters(cluster_ids)
+        else:
+            for index, map_id in enumerate(self.active_map_ids):
+                cluster_ids = self.latent_space_datasets[map_id].diastolic_cluster_ids[size_id]
+                self.comp_patient_containers[index].setStreamlineClusters(cluster_ids)
+
+    
+    def updateStreamlineClusterSize(self):
+        nr_maps = len(self.active_map_ids)
+
+        # all lines
+        if nr_maps <= 4:
+            for index in range(nr_maps):
+                self.comp_patient_containers[index].setStreamlineClusters(None)
+
+        # 30 lines
+        elif 5 <= nr_maps <= 12:
+            self.setStreamlineClusterSize(0)
+
+        # 10 lines
+        else:
+            self.setStreamlineClusterSize(1)
 
     
     def loadPatient(self, patient_dict):
@@ -951,11 +984,13 @@ class FlowCompModule(QWidget):
             self.levels_max_spinbox.setSuffix(" [Pa]")
         
         # update 3D views
+        self.updateStreamlineClusterSize()
         self.comp_patient_view.GetRenderWindow().Render()
 
     
     def setColorMap(self, index):
-        self.cmap = pg.colormap.get(COLORMAP_KEYS[index])
+        self.cmap = pg.colormap.get(COLORMAP_KEYS[index], skipCache=True)
+        self.cmap.reverse()
         self.vtk_lut = getVTKLookupTable(self.cmap)
         self.color_bar.setColorMap(self.cmap)
         for ls_dataset in self.latent_space_datasets:
@@ -1222,15 +1257,15 @@ class LatentSpace3DContainer():
         self.streamlines_transform_filter.SetInputData(self.streamlines_systolic)
         self.streamlines_transform_filter.SetTransform(transform)
 
-        self.streamlines_mapper = vtk.vtkDataSetMapper()
         self.streamlines_cell_extractor = vtk.vtkExtractCells()
-        self.setStreamlineClusters(stream_cluster_ids)
 
+        self.streamlines_mapper = vtk.vtkDataSetMapper()
         self.streamlines_mapper.SetScalarRange(scale_min, scale_max)
         self.streamlines_mapper.SetLookupTable(lut)
         self.streamlines_actor = vtk.vtkActor()
         self.streamlines_actor.GetProperty().SetLineWidth(3)
         self.streamlines_actor.SetMapper(self.streamlines_mapper)
+        self.setStreamlineClusters(stream_cluster_ids)
 
         # create a renderer, save own camera (viewports will be set later)
         self.renderer = vtk.vtkRenderer()
@@ -1272,10 +1307,12 @@ class LatentSpace3DContainer():
         if stream_cluster_ids is None:
             # no clustering
             self.streamlines_mapper.SetInputConnection(self.streamlines_transform_filter.GetOutputPort())
+            self.streamlines_actor.GetProperty().SetLineWidth(3)
         else:
             self.streamlines_cell_extractor.SetInputConnection(self.streamlines_transform_filter.GetOutputPort())
             self.streamlines_cell_extractor.SetCellList(stream_cluster_ids)
             self.streamlines_mapper.SetInputConnection(self.streamlines_cell_extractor.GetOutputPort())
+            self.streamlines_actor.GetProperty().SetLineWidth(6)
 
     def setViewSurface(self, field_name, levels):
         self.surface.GetPointData().SetActiveScalars(field_name)
@@ -1314,7 +1351,7 @@ class CheckBoxDecorator(QWidget):
         super(CheckBoxDecorator, self).__init__()
         self.checkbox = QCheckBox()
         self.checkbox.setChecked(True)
-        self.label = QLabel('<font color="#FFFFFF">'+text+'</font>')
+        self.label = QLabel(text)
         l = QHBoxLayout()
         l.addWidget(self.checkbox)
         l.addWidget(self.label)
