@@ -53,7 +53,7 @@ LANDMARK_TARGETS.InsertNextPoint([0, 0, -LANDMARK_RANGE]) # ACC
 LANDMARK_TARGETS.InsertNextPoint([-LANDMARK_RANGE*np.sin(LANDMARK_ALPHA), 0, LANDMARK_RANGE*np.cos(LANDMARK_ALPHA)]) # ACI
 LANDMARK_TARGETS.InsertNextPoint([LANDMARK_RANGE*np.sin(LANDMARK_ALPHA), 0, LANDMARK_RANGE*np.cos(LANDMARK_ALPHA)]) # ACE
 
-STREAMLINE_CLUSTER_SIZES = ["30", "10"] # nr of cascaded streamline clusters
+STREAMLINE_CLUSTER_SIZES = ["200", "100", "30", "10"] # nr of cascaded streamline clusters
 
 
 def getVTKLookupTable(cmap, nPts=512):
@@ -761,17 +761,25 @@ class FlowCompModule(QWidget):
         nr_maps = len(self.active_map_ids)
 
         # all lines
-        if nr_maps <= 4:
+        if True:#nr_maps <= 4:
             for index in range(nr_maps):
                 self.comp_patient_containers[index].setStreamlineClusters(None)
 
-        # 30 lines
-        elif 5 <= nr_maps <= 12:
+        # 200 lines
+        elif nr_maps <= 9:
             self.setStreamlineClusterSize(0)
+
+        # 100 lines
+        elif nr_maps <= 16:
+            self.setStreamlineClusterSize(1)
+
+        # 30 lines
+        elif nr_maps <= 25:
+            self.setStreamlineClusterSize(2)
 
         # 10 lines
         else:
-            self.setStreamlineClusterSize(1)
+            self.setStreamlineClusterSize(3)
 
     
     def loadPatient(self, patient_dict):
@@ -1240,14 +1248,6 @@ class LatentSpace3DContainer():
             reader.Update()
             self.streamlines_systolic = reader.GetOutput()
             self.streamlines_systolic.GetPointData().SetActiveScalars('velocity_systolic_mag')
-
-            # streamline_lengths = [self.streamlines_systolic.GetCell(i).GetNumberOfPoints() for i in range(self.streamlines_systolic.GetNumberOfCells())]
-            # streamline_lengths = np.array(streamline_lengths, dtype=np.int32)
-            # streamline_indices_by_len = np.argsort(streamline_lengths)[::-1]
-            # self.id_list = vtk.vtkIdList()
-            # for cluster_id in streamline_indices_by_len[:20]:
-            #     self.id_list.InsertNextId(cluster_id)
-
         else:
             self.streamlines_systolic = vtk.vtkPolyData()
 
@@ -1318,9 +1318,8 @@ class LatentSpace3DContainer():
         else:
             self.streamlines_cell_extractor.SetInputConnection(self.streamlines_transform_filter.GetOutputPort())
             self.streamlines_cell_extractor.SetCellList(stream_cluster_ids)
-            # self.streamlines_cell_extractor.SetCellList(self.id_list)
             self.streamlines_mapper.SetInputConnection(self.streamlines_cell_extractor.GetOutputPort())
-            self.streamlines_actor.GetProperty().SetLineWidth(6)
+            self.streamlines_actor.GetProperty().SetLineWidth(4)
 
     def setViewSurface(self, field_name, levels):
         self.surface.GetPointData().SetActiveScalars(field_name)
