@@ -54,7 +54,7 @@ LANDMARK_TARGETS.InsertNextPoint([-LANDMARK_RANGE*np.sin(LANDMARK_ALPHA), 0, LAN
 LANDMARK_TARGETS.InsertNextPoint([LANDMARK_RANGE*np.sin(LANDMARK_ALPHA), 0, LANDMARK_RANGE*np.cos(LANDMARK_ALPHA)]) # ACE
 
 STREAMLINE_CLUSTER_SIZES = ["200", "100", "30", "10"] # nr of cascaded streamline clusters
-
+VIEWPORT_BORDER_WIDTH = 0.002 # fraction of comparison viewport to be used for inner borders
 
 def getVTKLookupTable(cmap, nPts=512):
     # returns a vtkLookupTable from any given pyqtgraph colormap
@@ -446,7 +446,7 @@ class FlowCompModule(QWidget):
         self.comp_patient_view = QVTKRenderWindowInteractor()
         self.comp_patient_view.SetInteractorStyle(style)
         self.background_renderer = vtk.vtkRenderer()
-        self.background_renderer.SetBackground(1,1,1)
+        self.background_renderer.SetBackground(240/255, 240/255, 240/255)
         self.comp_patient_view.GetRenderWindow().AddRenderer(self.background_renderer)
 
         # 3D views vertical splitter
@@ -721,6 +721,7 @@ class FlowCompModule(QWidget):
 
         # update the active items, update scenes
         nr_maps = len(self.active_map_ids)
+        vpb = VIEWPORT_BORDER_WIDTH
         if nr_maps > 0:
             nr_rows = int(np.rint(np.sqrt(nr_maps)))
             nr_cols = int(np.ceil(nr_maps / nr_rows))
@@ -733,7 +734,7 @@ class FlowCompModule(QWidget):
             # update viewports
             row = nr_rows - 1 - int(i / nr_cols) # top -> bottom rows
             col = int(i % nr_cols)
-            self.comp_patient_containers[i].renderer.SetViewport(col * w, row * h, (col + 1) * w, (row + 1) * h)
+            self.comp_patient_containers[i].renderer.SetViewport(col * w + vpb, row * h + vpb, (col + 1) * w - vpb, (row + 1) * h - vpb)
             if nr_maps <= 9:
                 self.comp_patient_containers[i].setIdText(i+1, True)
             else:
