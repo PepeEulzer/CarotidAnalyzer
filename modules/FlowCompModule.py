@@ -7,7 +7,7 @@ import pyqtgraph as pg
 
 from glob import glob
 from PyQt5.QtWidgets import (QWidget, QGridLayout, QHBoxLayout, QVBoxLayout, QLabel, QSplitter, 
-    QComboBox, QCheckBox, QDoubleSpinBox, QPushButton)
+    QComboBox, QCheckBox, QDoubleSpinBox, QPushButton, QSlider)
 from PyQt5.QtCore import Qt, pyqtSignal
 from PyQt5.QtGui import QPalette, QColor
 from PyQt5 import QtCore, QtGui
@@ -359,6 +359,18 @@ class FlowCompModule(QWidget):
         self.levels_max_spinbox.valueChanged[float].connect(self.setLevelsMax)
         self.colormap_title = QLabel(MAP_TITLE_NAMES[0])
 
+        # flow lens
+        self.flow_lens_checkbox = QCheckBox("Flow Lens")
+        self.flow_lens_checkbox.stateChanged[int].connect(self.toggleFlowLens)
+        self.flow_lens_slider = QSlider(Qt.Horizontal)
+        self.flow_lens_slider.setMinimum(1)
+        self.flow_lens_slider.setMaximum(150)
+        self.flow_lens_slider.setValue(70)
+        self.flow_lens_slider.setTickPosition(QSlider.TicksBelow)
+        self.flow_lens_slider.setTickInterval(30)
+        self.flow_lens_slider.sliderMoved[int].connect(self.setFlowLensSize)
+        self.flow_lens_slider.setEnabled(False)
+
         # link/unlink cameras
         self.link_cam_checkbox = QCheckBox("Link cameras")
         self.link_cam_checkbox.stateChanged[int].connect(self.linkCameras)
@@ -381,9 +393,12 @@ class FlowCompModule(QWidget):
         self.toolbar_layout.addWidget(graphics_view, 1, 5)
         self.toolbar_layout.addWidget(self.levels_max_spinbox, 1, 6)
         self.toolbar_layout.addWidget(VerticalLine(), 0, 7, 2, 1)
-        self.toolbar_layout.setColumnStretch(8, 1)
-        self.toolbar_layout.addWidget(self.reset_button, 0, 8, Qt.AlignRight)
-        self.toolbar_layout.addWidget(self.link_cam_checkbox, 1, 8, Qt.AlignRight)
+        self.toolbar_layout.addWidget(self.flow_lens_checkbox, 0, 8, Qt.AlignLeft | Qt.AlignBottom)
+        self.toolbar_layout.addWidget(self.flow_lens_slider, 1, 8)
+        self.toolbar_layout.addWidget(VerticalLine(), 0, 9, 2, 1)
+        self.toolbar_layout.setColumnStretch(10, 1)
+        self.toolbar_layout.addWidget(self.reset_button, 0, 10, Qt.AlignRight)
+        self.toolbar_layout.addWidget(self.link_cam_checkbox, 1, 10, Qt.AlignRight)
 
         # -------------------------------------
         # 3D views
@@ -452,8 +467,6 @@ class FlowCompModule(QWidget):
         self.comp_patient_view.GetRenderWindow().AddRenderer(self.background_renderer)
         self.picker = vtk.vtkCellPicker()
         self.picker.SetTolerance(0.0005)
-        self.enablePickerObserver = self.comp_style.AddObserver("RightButtonPressEvent", self.enablePickLense)
-        self.disablePickerObserver = self.comp_style.AddObserver("RightButtonReleaseEvent", self.disablePickLense)
 
         # 3D views vertical splitter
         self.splitter_3D = QSplitter(self)
@@ -711,6 +724,9 @@ class FlowCompModule(QWidget):
                 )
             if self.link_cam_checkbox.isChecked():
                 container.useLinkedCamera(self.active_patient_camera)
+            if self.flow_lens_checkbox.isChecked():
+                container.setStreamlineLense(True)
+                container.clipsphere.SetRadius(self.flow_lens_slider.value() / 10.0)
             self.comp_patient_containers.append(container)
             self.comp_patient_view.GetRenderWindow().AddRenderer(container.renderer)
         
@@ -977,6 +993,9 @@ class FlowCompModule(QWidget):
                     container.setViewStreamlines(levels, systolic=True)
                 else:
                     container.setViewStreamlines(levels, systolic=False)
+                if self.flow_lens_checkbox.isChecked():
+                    container.setStreamlineLense(True)
+                    container.clipsphere.SetRadius(self.flow_lens_slider.value() / 10.0)
             self.levels_min_spinbox.setSingleStep(0.5)
             self.levels_max_spinbox.setSingleStep(0.5)
             self.levels_min_spinbox.setSuffix(" [m/s]")
@@ -1033,6 +1052,25 @@ class FlowCompModule(QWidget):
             self.polling_counter = 0
             self.comp_patient_view.GetRenderWindow().Render()
             self.active_patient_view.GetRenderWindow().Render()
+
+    def toggleFlowLens(self, on):
+        if on:
+            self.enablePickerObserver = self.comp_style.AddObserver("RightButtonPressEvent", self.enablePickLense)
+            self.disablePickerObserver = self.comp_style.AddObserver("RightButtonReleaseEvent", self.disablePickLense)
+            self.flow_lens_slider.setEnabled(True)
+        else:
+            self.comp_style.RemoveObserver(self.enablePickerObserver)
+            self.comp_style.RemoveObserver(self.disablePickerObserver)
+            self.flow_lens_slider.setEnabled(False)
+        for container in self.comp_patient_containers:
+            container.setStreamlineLense(on)
+            container.clipsphere.SetRadius(self.flow_lens_slider.value() / 10.0)
+            container.renderer.GetRenderWindow().Render()
+
+    def setFlowLensSize(self, size):
+        for container in self.comp_patient_containers:
+            container.clipsphere.SetRadius(size / 10.0)
+            container.renderer.GetRenderWindow().Render()
 
     def enablePickLense(self, obj, event):
         self.pickPointObserver = self.comp_style.AddObserver("MouseMoveEvent", self.pickLensePosition)
@@ -1319,7 +1357,6 @@ class LatentSpace3DContainer():
         self.streamlines_mapper.SetLookupTable(lut)
         self.streamlines_actor = vtk.vtkActor()
         self.streamlines_actor.GetProperty().SetLineWidth(3)
-        self.streamlines_actor.GetProperty().SetOpacity(0.05)
         self.streamlines_actor.SetMapper(self.streamlines_mapper)
         self.setStreamlineClusters(stream_cluster_ids)
 
@@ -1331,14 +1368,16 @@ class LatentSpace3DContainer():
         self.camera.SetFocalPoint(0, 0, 0)
         self.camera.SetViewUp(0, -1, 0)
         if 'velocity_sys' in active_field_name:
+            self.streamlines_on = True
             self.renderer.AddActor(self.streamlines_actor)
-            self.renderer.AddActor(self.clipper_actor)
             self.surface_actor.GetProperty().FrontfaceCullingOn()
         elif 'velocity_dia' in active_field_name:
+            self.streamlines_on = True
             self.streamlines_transform_filter.SetInputData(self.streamlines_diastolic)
             self.renderer.AddActor(self.streamlines_actor)
-            self.renderer.AddActor(self.clipper_actor)
             self.surface_actor.GetProperty().FrontfaceCullingOn()
+        else:
+            self.streamlines_on = False
         self.renderer.AddActor(self.surface_actor)
         self.renderer.AddActor(self.identifier_text)
         self.renderer.ResetCamera()
@@ -1348,6 +1387,14 @@ class LatentSpace3DContainer():
             self.identifier_text.SetInput(str(identifier) + self.stenosis_degree_str)
         else:
             self.identifier_text.SetInput(str(identifier))
+
+    def setStreamlineLense(self, on):
+        if on:
+            self.renderer.AddActor(self.clipper_actor)
+            self.streamlines_actor.GetProperty().SetOpacity(0.05)
+        else:
+            self.renderer.RemoveActor(self.clipper_actor)
+            self.streamlines_actor.GetProperty().SetOpacity(1)
 
     def setStreamlineLensePos(self, position):
         self.clipsphere.SetCenter(position)
@@ -1366,7 +1413,7 @@ class LatentSpace3DContainer():
         self.streamlines_mapper.SetScalarRange(levels)
         self.clipper_mapper.SetScalarRange(levels)
         self.renderer.AddActor(self.streamlines_actor)
-        self.renderer.AddActor(self.clipper_actor)
+        self.streamlines_on = True
 
     def setStreamlineClusters(self, stream_cluster_ids):
         if stream_cluster_ids is None:
