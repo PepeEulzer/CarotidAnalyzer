@@ -1,5 +1,4 @@
 import os
-import random
 import json
 
 import vtk
@@ -8,7 +7,7 @@ import pyqtgraph as pg
 
 from glob import glob
 from PyQt5.QtWidgets import (QWidget, QGridLayout, QHBoxLayout, QVBoxLayout, QLabel, QSplitter, 
-    QComboBox, QCheckBox, QSizePolicy, QDoubleSpinBox, QPushButton)
+    QComboBox, QCheckBox, QDoubleSpinBox, QPushButton)
 from PyQt5.QtCore import Qt, pyqtSignal
 from PyQt5.QtGui import QPalette, QColor
 from PyQt5 import QtCore, QtGui
@@ -217,6 +216,9 @@ class LatentSpaceDataSet(object):
 
     def __lt__(self, other):
         return self.similarity_score < other.similarity_score
+    
+    def getLandmarkList(self):
+        return [self.landmark_ACC, self.landmark_ACI, self.landmark_ACE]
 
     def compareWithCase(self, distance_to_case, case_stenosis_degree, case_diameter_profile, case_bifurcation_index):
         if self.diameter_profile is None or case_diameter_profile is None:
@@ -442,12 +444,16 @@ class FlowCompModule(QWidget):
         self.active_patient_actor_plaque.GetProperty().BackfaceCullingOn()
 
         # comparison patients vtk objects
-        style = vtk.vtkInteractorStyleTrackballCamera()
+        self.comp_style = vtk.vtkInteractorStyleTrackballCamera()
         self.comp_patient_view = QVTKRenderWindowInteractor()
-        self.comp_patient_view.SetInteractorStyle(style)
+        self.comp_patient_view.SetInteractorStyle(self.comp_style)
         self.background_renderer = vtk.vtkRenderer()
         self.background_renderer.SetBackground(240/255, 240/255, 240/255)
         self.comp_patient_view.GetRenderWindow().AddRenderer(self.background_renderer)
+        self.picker = vtk.vtkCellPicker()
+        self.picker.SetTolerance(0.0005)
+        self.enablePickerObserver = self.comp_style.AddObserver("RightButtonPressEvent", self.enablePickLense)
+        self.disablePickerObserver = self.comp_style.AddObserver("RightButtonReleaseEvent", self.disablePickLense)
 
         # 3D views vertical splitter
         self.splitter_3D = QSplitter(self)
@@ -701,7 +707,7 @@ class FlowCompModule(QWidget):
                 stream_cluster_ids=None,
                 trans=translation,
                 rot=rotation,
-                landmarks=[ls_dataset.landmark_ACC, ls_dataset.landmark_ACI, ls_dataset.landmark_ACE]
+                landmarks=ls_dataset.getLandmarkList()
                 )
             if self.link_cam_checkbox.isChecked():
                 container.useLinkedCamera(self.active_patient_camera)
@@ -762,7 +768,7 @@ class FlowCompModule(QWidget):
         nr_maps = len(self.active_map_ids)
 
         # all lines
-        if True:#nr_maps <= 4:
+        if nr_maps <= 4:
             for index in range(nr_maps):
                 self.comp_patient_containers[index].setStreamlineClusters(None)
 
@@ -945,6 +951,7 @@ class FlowCompModule(QWidget):
         else:
             for container in self.comp_patient_containers:
                 container.streamlines_mapper.SetScalarRange(levels)
+                container.clipper_mapper.SetScalarRange(levels)
         self.comp_patient_view.GetRenderWindow().Render()
 
     
@@ -1006,6 +1013,7 @@ class FlowCompModule(QWidget):
         for container in self.comp_patient_containers:
             container.surface_mapper.SetLookupTable(self.vtk_lut)
             container.streamlines_mapper.SetLookupTable(self.vtk_lut)
+            container.clipper_mapper.SetLookupTable(self.vtk_lut)
         self.comp_patient_view.GetRenderWindow().Render()
         
     
@@ -1026,6 +1034,27 @@ class FlowCompModule(QWidget):
             self.comp_patient_view.GetRenderWindow().Render()
             self.active_patient_view.GetRenderWindow().Render()
 
+    def enablePickLense(self, obj, event):
+        self.pickPointObserver = self.comp_style.AddObserver("MouseMoveEvent", self.pickLensePosition)
+
+    def disablePickLense(self, obj, event):
+        self.comp_style.RemoveObserver(self.pickPointObserver)
+
+    def pickLensePosition(self, obj, event):
+        if len(self.comp_patient_containers) == 0:
+            return
+        
+        x_screen, y_screen = self.comp_patient_view.GetEventPosition()
+        obj.FindPokedRenderer(x_screen, y_screen)
+        renderer = obj.GetCurrentRenderer()
+
+        self.picker.Pick(x_screen, y_screen, 0, renderer)
+        picked_pos = self.picker.GetPickPosition()
+        
+        for container in self.comp_patient_containers:
+            if renderer == container.renderer:
+                container.setStreamlineLensePos(picked_pos)
+        self.comp_patient_view.GetRenderWindow().Render()
 
     def showEvent(self, event):
         self.active_patient_view.Enable()
@@ -1242,7 +1271,7 @@ class LatentSpace3DContainer():
         self.surface_actor.GetProperty().SetInterpolationToGouraud()
         self.surface_actor.SetMapper(self.surface_mapper)
         
-        # streamlines
+        # streamlines + velocity values
         if stream_sys_path is not None:
             reader = vtk.vtkXMLPolyDataReader()
             reader.SetFileName(stream_sys_path)
@@ -1264,6 +1293,24 @@ class LatentSpace3DContainer():
         self.streamlines_transform_filter = vtk.vtkTransformFilter()
         self.streamlines_transform_filter.SetInputData(self.streamlines_systolic)
         self.streamlines_transform_filter.SetTransform(transform)
+        self.streamlines_transform_filter.Update()
+
+        self.clipsphere = vtk.vtkSphere()
+        self.clipsphere.SetCenter((0.0, 0.0, 0.0))
+        self.clipsphere.SetRadius(10)
+        self.clipper = vtk.vtkClipPolyData()
+        self.clipper.SetInputDataObject(self.streamlines_transform_filter.GetOutput())
+        self.clipper.SetClipFunction(self.clipsphere)
+        self.clipper.SetInsideOut(True)
+        self.clipper.Update()
+        max_vel_systolic = self.clipper.GetOutput().GetPointData().GetScalars().GetRange()[1]
+        self.clipper_mapper = vtk.vtkDataSetMapper()
+        self.clipper_mapper.SetInputConnection(self.clipper.GetOutputPort())
+        self.clipper_mapper.SetScalarRange(scale_min, scale_max)
+        self.clipper_mapper.SetLookupTable(lut)
+        self.clipper_actor = vtk.vtkActor()
+        self.clipper_actor.GetProperty().SetLineWidth(3)
+        self.clipper_actor.SetMapper(self.clipper_mapper)
 
         self.streamlines_cell_extractor = vtk.vtkExtractCells()
 
@@ -1272,6 +1319,7 @@ class LatentSpace3DContainer():
         self.streamlines_mapper.SetLookupTable(lut)
         self.streamlines_actor = vtk.vtkActor()
         self.streamlines_actor.GetProperty().SetLineWidth(3)
+        self.streamlines_actor.GetProperty().SetOpacity(0.05)
         self.streamlines_actor.SetMapper(self.streamlines_mapper)
         self.setStreamlineClusters(stream_cluster_ids)
 
@@ -1284,10 +1332,12 @@ class LatentSpace3DContainer():
         self.camera.SetViewUp(0, -1, 0)
         if 'velocity_sys' in active_field_name:
             self.renderer.AddActor(self.streamlines_actor)
+            self.renderer.AddActor(self.clipper_actor)
             self.surface_actor.GetProperty().FrontfaceCullingOn()
         elif 'velocity_dia' in active_field_name:
             self.streamlines_transform_filter.SetInputData(self.streamlines_diastolic)
             self.renderer.AddActor(self.streamlines_actor)
+            self.renderer.AddActor(self.clipper_actor)
             self.surface_actor.GetProperty().FrontfaceCullingOn()
         self.renderer.AddActor(self.surface_actor)
         self.renderer.AddActor(self.identifier_text)
@@ -1298,7 +1348,12 @@ class LatentSpace3DContainer():
             self.identifier_text.SetInput(str(identifier) + self.stenosis_degree_str)
         else:
             self.identifier_text.SetInput(str(identifier))
-    
+
+    def setStreamlineLensePos(self, position):
+        self.clipsphere.SetCenter(position)
+        max_vel_systolic = self.clipper.GetOutput().GetPointData().GetScalars().GetRange()[1]
+        # TODO update text field
+
     def setViewStreamlines(self, levels, systolic:bool):
         if systolic:
             self.streamlines_transform_filter.SetInputData(self.streamlines_systolic)
@@ -1309,7 +1364,9 @@ class LatentSpace3DContainer():
         self.surface_actor.GetProperty().FrontfaceCullingOn()
         self.streamlines_transform_filter.Update()
         self.streamlines_mapper.SetScalarRange(levels)
+        self.clipper_mapper.SetScalarRange(levels)
         self.renderer.AddActor(self.streamlines_actor)
+        self.renderer.AddActor(self.clipper_actor)
 
     def setStreamlineClusters(self, stream_cluster_ids):
         if stream_cluster_ids is None:
@@ -1327,6 +1384,7 @@ class LatentSpace3DContainer():
         self.surface_mapper.SetScalarRange(levels)
         self.surface_actor.GetProperty().FrontfaceCullingOff()
         self.renderer.RemoveActor(self.streamlines_actor)
+        self.renderer.RemoveActor(self.clipper_actor)
 
     def useLinkedCamera(self, cam):
         self.renderer.SetActiveCamera(cam)
