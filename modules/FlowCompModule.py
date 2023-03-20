@@ -362,6 +362,7 @@ class FlowCompModule(QWidget):
 
         # flow lens
         self.flow_lens_checkbox = QCheckBox("Flow Lens")
+        self.flow_lens_checkbox.setEnabled(False)
         self.flow_lens_checkbox.stateChanged[int].connect(self.toggleFlowLens)
         self.flow_lens_slider = QSlider(Qt.Horizontal)
         self.flow_lens_slider.setMinimum(1)
@@ -1001,6 +1002,7 @@ class FlowCompModule(QWidget):
             self.levels_max_spinbox.setSingleStep(0.5)
             self.levels_min_spinbox.setSuffix(" [m/s]")
             self.levels_max_spinbox.setSuffix(" [m/s]")
+            self.flow_lens_checkbox.setEnabled(True)
 
         # surface field? -> display surface
         else:
@@ -1017,6 +1019,7 @@ class FlowCompModule(QWidget):
             self.levels_max_spinbox.setSingleStep(10)
             self.levels_min_spinbox.setSuffix(" [Pa]")
             self.levels_max_spinbox.setSuffix(" [Pa]")
+            self.flow_lens_checkbox.setEnabled(False)
         
         # update 3D views
         self.updateStreamlineClusterSize()
@@ -1455,6 +1458,7 @@ class LatentSpace3DContainer():
         self.surface_actor.GetProperty().FrontfaceCullingOff()
         self.renderer.RemoveActor(self.streamlines_actor)
         self.renderer.RemoveActor(self.clipper_actor)
+        self.renderer.RemoveActor(self.vel_text_actor)
 
     def useLinkedCamera(self, cam):
         self.renderer.SetActiveCamera(cam)
