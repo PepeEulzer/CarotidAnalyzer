@@ -54,6 +54,7 @@ LANDMARK_TARGETS.InsertNextPoint([LANDMARK_RANGE*np.sin(LANDMARK_ALPHA), 0, LAND
 
 STREAMLINE_CLUSTER_SIZES = ["200", "100", "30", "10"] # nr of cascaded streamline clusters
 VIEWPORT_BORDER_WIDTH = 0.002 # fraction of comparison viewport to be used for inner borders
+TEXT_SIZE = 20
 
 def getVTKLookupTable(cmap, nPts=512):
     # returns a vtkLookupTable from any given pyqtgraph colormap
@@ -995,7 +996,7 @@ class FlowCompModule(QWidget):
                     container.setViewStreamlines(levels, systolic=False)
                 if self.flow_lens_checkbox.isChecked():
                     container.setStreamlineLense(True)
-                    container.clipsphere.SetRadius(self.flow_lens_slider.value() / 10.0)
+                    container.setStreamlineLenseRad(self.flow_lens_slider.value() / 10.0)
             self.levels_min_spinbox.setSingleStep(0.5)
             self.levels_max_spinbox.setSingleStep(0.5)
             self.levels_min_spinbox.setSuffix(" [m/s]")
@@ -1064,12 +1065,12 @@ class FlowCompModule(QWidget):
             self.flow_lens_slider.setEnabled(False)
         for container in self.comp_patient_containers:
             container.setStreamlineLense(on)
-            container.clipsphere.SetRadius(self.flow_lens_slider.value() / 10.0)
+            container.setStreamlineLenseRad(self.flow_lens_slider.value() / 10.0)
             container.renderer.GetRenderWindow().Render()
 
     def setFlowLensSize(self, size):
         for container in self.comp_patient_containers:
-            container.clipsphere.SetRadius(size / 10.0)
+            container.setStreamlineLenseRad(size / 10.0)
             container.renderer.GetRenderWindow().Render()
 
     def enablePickLense(self, obj, event):
@@ -1341,7 +1342,6 @@ class LatentSpace3DContainer():
         self.clipper.SetClipFunction(self.clipsphere)
         self.clipper.SetInsideOut(True)
         self.clipper.Update()
-        max_vel_systolic = self.clipper.GetOutput().GetPointData().GetScalars().GetRange()[1]
         self.clipper_mapper = vtk.vtkDataSetMapper()
         self.clipper_mapper.SetInputConnection(self.clipper.GetOutputPort())
         self.clipper_mapper.SetScalarRange(scale_min, scale_max)
@@ -1359,6 +1359,13 @@ class LatentSpace3DContainer():
         self.streamlines_actor.GetProperty().SetLineWidth(3)
         self.streamlines_actor.SetMapper(self.streamlines_mapper)
         self.setStreamlineClusters(stream_cluster_ids)
+
+        # text actor for clipper (max velocity)
+        self.vel_text_actor = vtk.vtkBillboardTextActor3D()
+        self.vel_text_actor.GetTextProperty().SetFontSize(TEXT_SIZE)
+        self.vel_text_actor.GetTextProperty().SetColor(0, 0, 0)
+        self.vel_text_actor.GetTextProperty().SetJustificationToCentered()
+        self.setStreamlineLensePos((0.0, 0.0, 0.0)) # sets and updates actor as well
 
         # create a renderer, save own camera (viewports will be set later)
         self.renderer = vtk.vtkRenderer()
@@ -1388,18 +1395,32 @@ class LatentSpace3DContainer():
         else:
             self.identifier_text.SetInput(str(identifier))
 
+    def updateVelocityText(self):
+        max_vel_systolic = self.clipper.GetOutput().GetPointData().GetScalars().GetRange()[1]
+        self.vel_text_actor.SetInput("Max. Velocity: " + str(np.round(max_vel_systolic, 1)) + " [m/s]")
+
     def setStreamlineLense(self, on):
         if on:
             self.renderer.AddActor(self.clipper_actor)
-            self.streamlines_actor.GetProperty().SetOpacity(0.05)
+            self.renderer.AddActor(self.vel_text_actor)
+            self.updateVelocityText()
+            self.streamlines_actor.GetProperty().SetOpacity(0.02)
         else:
             self.renderer.RemoveActor(self.clipper_actor)
+            self.renderer.RemoveActor(self.vel_text_actor)
             self.streamlines_actor.GetProperty().SetOpacity(1)
 
     def setStreamlineLensePos(self, position):
         self.clipsphere.SetCenter(position)
-        max_vel_systolic = self.clipper.GetOutput().GetPointData().GetScalars().GetRange()[1]
-        # TODO update text field
+        rad = self.clipsphere.GetRadius()
+        self.vel_text_actor.SetPosition(position[0], position[1], position[2]-rad*1.3)
+        self.updateVelocityText()
+
+    def setStreamlineLenseRad(self, rad):
+        self.clipsphere.SetRadius(rad)
+        position = self.clipsphere.GetCenter()
+        self.vel_text_actor.SetPosition(position[0], position[1], position[2]-rad*1.3)
+        self.updateVelocityText()
 
     def setViewStreamlines(self, levels, systolic:bool):
         if systolic:
@@ -1414,6 +1435,8 @@ class LatentSpace3DContainer():
         self.clipper_mapper.SetScalarRange(levels)
         self.renderer.AddActor(self.streamlines_actor)
         self.streamlines_on = True
+        self.clipper.Update()
+        self.updateVelocityText()
 
     def setStreamlineClusters(self, stream_cluster_ids):
         if stream_cluster_ids is None:
