@@ -44,13 +44,13 @@ A full pipeline for cropping, model extraction, centerline computation, and inte
 With a CUDA-enabled GPU:
 
 ```bash
-conda create -n CarotidAnalyzer pytorch torchvision torchaudio pytorch-cuda=11.7 -c pytorch -c nvidia
+conda create -n CarotidAnalyzer python=3.10 pytorch torchvision torchaudio pytorch-cuda=11.7 -c pytorch -c nvidia
 ```
 
 > **or** install Pytorch for CPU only:
 >
 > ```bash
-> conda create -n CarotidAnalyzer pytorch torchvision torchaudio cpuonly -c pytorch
+> conda create -n CarotidAnalyzer python=3.10 pytorch torchvision torchaudio cpuonly -c pytorch
 > ```
 
 Then, install the other packages:
