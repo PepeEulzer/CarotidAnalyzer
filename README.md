@@ -4,6 +4,10 @@ A full pipeline for cropping, model extraction, centerline computation, and inte
 
 ![Pipeline Overview](./img/carotid_pipeline.png)
 
+This repository belongs to the following publication:
+
+P. Eulzer,  F. von Deylen,  W.-C. Hsu,  R. Wickenhöfer,  C. M. Klingner,  and K. Lawonn (2023), A Fully Integrated Pipeline for Visual Carotid Morphology Analysis. Computer Graphics Forum, 42(3): 25-37. [https://doi.org/10.1111/cgf.14808](https://doi.org/10.1111/cgf.14808)
+
 ## Database
 The carotid bifurcation model database is available at: [https://doi.org/10.5281/zenodo.7634643](https://doi.org/10.5281/zenodo.7634643). After download, it can be used as a target folder for the application.
 
