@@ -1,5 +1,6 @@
 import os
 import json
+from time import perf_counter
 
 import vtk
 import numpy as np
@@ -899,6 +900,7 @@ class FlowCompModule(QWidget):
             col = -1
 
         # make comparisons
+        # start = perf_counter()
         for ls_dataset in self.latent_space_datasets:
             # find distance if it exists
             try:
@@ -915,10 +917,14 @@ class FlowCompModule(QWidget):
                 case_diameter_profile=diameter_profile,
                 case_bifurcation_index=bifurcation_index,
                 case_stenosis_degree=stenosis_degree)
+        # end = perf_counter()
+        # print("Computing metrics executed in", end-start, "sec.")
         self.sortLatentSpace()
 
     
     def sortLatentSpace(self):
+        # start = perf_counter()
+
         # update the score values
         shape_w    = 1 if self.shape_checkbox.checkbox.isChecked() else 0
         diam_w     = 1 if self.diameter_checkbox.checkbox.isChecked() else 0
@@ -935,6 +941,9 @@ class FlowCompModule(QWidget):
             ls_dataset.map_view.list_index = index # will be returned on click
             if ls_dataset.is_clicked:
                 self.active_map_ids.append(index)
+
+        # end = perf_counter()
+        # print("Sorting executed in", end-start, "sec.")
 
         # display maps in new order
         self.fillMapView(force_reload=True)
