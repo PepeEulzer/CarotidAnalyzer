@@ -620,7 +620,7 @@ class FlowCompModule(QWidget):
             self.dist_mat = np.loadtxt(matrix_file, dtype=np.float32)
             self.dist_mat /= np.max(self.dist_mat) # normalize
         else:
-            print("WARNING: Distance matrix could not be found.")
+            print("WARNING (FlowComp Module): Distance matrix could not be found.")
         self.dist_mat_identifiers = [] # list of case identifiers, rows/colums of matrix
 
         # flow database
@@ -640,7 +640,7 @@ class FlowCompModule(QWidget):
                 self.dist_mat_identifiers.append(identifier)
 
         if len(self.dist_mat_identifiers) != self.dist_mat.shape[0]:
-            print("WARNING: Distance matrix shape", self.dist_mat.shape[0],
+            print("WARNING (FlowComp Module): Distance matrix shape", self.dist_mat.shape[0],
                   "does not match number of cases", len(self.dist_mat_identifiers))
 
         # new patients
@@ -707,7 +707,7 @@ class FlowCompModule(QWidget):
                 translation = self.vessel_translations[case_identifier]
                 rotation = self.vessel_rotations[case_identifier]
             except:
-                print("Warning: No translation/rotation found for", case_identifier)
+                print("Warning (FlowComp Module): No translation/rotation found for", case_identifier)
                 translation = None
                 rotation = None
             levels = self.getLevels()
@@ -873,7 +873,7 @@ class FlowCompModule(QWidget):
             translation_mat[0:3, 3] = np.array(trans)
             rotation_mat[0:3, 0:3] = np.reshape(rot, (3,3), order='F') # matrix is given column-wise
         except:
-            print("Warning: No translation/rotation found for", case_identifier)
+            print("Warning (FlowComp Module): No translation/rotation found for", case_identifier)
         transform_mat = rotation_mat @ translation_mat # translate, then rotate
         transform_mat = transform_mat.flatten(order='C') # row-wise input for vtk
         transform = vtk.vtkTransform()
