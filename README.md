@@ -1,17 +1,13 @@
-# Carotid Analyzer
+# Carotid Analyzer -- FlowComp Extension
 
-A full pipeline for cropping, model extraction, centerline computation, and interactive visualization of carotid artery geometries.
+Extension to the CarotidAnalyzer pipeline for blood flow analysis using morphological similarity.
 
-![Pipeline Overview](./img/carotid_pipeline.png)
-
-This repository belongs to the following publication:
-
-P. Eulzer,  F. von Deylen,  W.-C. Hsu,  R. Wickenhöfer,  C. M. Klingner,  and K. Lawonn (2023), A Fully Integrated Pipeline for Visual Carotid Morphology Analysis. Computer Graphics Forum, 42(3): 25-37. [https://doi.org/10.1111/cgf.14808](https://doi.org/10.1111/cgf.14808)
+![FlowComp Extension Overview](./img/carotid_flowComp.png)
 
 ## Database
-The carotid bifurcation model database is available at: [https://doi.org/10.5281/zenodo.7634643](https://doi.org/10.5281/zenodo.7634643). After download, it can be used as a target folder for the application.
+The carotid bifurcation and flow model database is available at: [https://doi.org/10.5281/zenodo.7634643](https://doi.org/10.5281/zenodo.7634643).
 
-> Note that the database contains only the reconstructed models and centerlines. The CTA scans are not public to preserve patient privacy.
+> Note that the database contains only the reconstructed models, centerlines, and simulated flow. The CTA scans are not public to preserve patient privacy.
 
 ## Files
 
@@ -79,44 +75,4 @@ The main application can now be run and modified.
 2. Any existing cases will be shown in the data inspector module. Double-click a case to load it or choose `Load Selected Patient`.
 3. To import new cases, use `File -> Load New DICOM` to create a new case subfolder and import a DICOM series (should be an axially resolved head/neck CTA). Choose the folder containing the series. Uncompressed  DICOM files are handled natively. Compressed files are handled by pydicom with numpy and GDCM, which enables import of most JPEG compression formats. See [this list](https://pydicom.github.io/pydicom/stable/old/image_data_handlers.html#guide-compressed) for a complete overview of supported formats.
 4. The pipeline can now be used on the new data. The application will ask if the full volume should be saved or only temporalily loaded. Saving full volumes may take 100-200 MB of disk space. If you do not intend to change the crop region later, saving can be omitted.
-
-## Implementing Extensions
-
-Extension modules that are a subclass of [QWidget](https://doc.qt.io/qtforpython-5/PySide2/QtWidgets/QWidget.html) can be integrated directly, analogous to the existing modules.
-
-Use Qt's signal/slot mechanism for pipeline communication:
-
-- Implement a `loadPatient(active_patient_dict)` method that reads all required files if they are present. The `active_patient_dict` is supplied by the application, it provides the filepaths of all files for the active case. See `CarotidAnalyzer.py -> setWorkingDir(dir)` for a list of the dictionary keys and file signatures and to append any new file signatures.
-- When data is edited, the `data_modified` signal should be triggered. It informs the application that changes were made and enables the save/discard actions.
-- Implement a `save()` method that saves modified data. The `save()` method of the active module is called when the save action is triggered by the user. 
-- Implement a `discard()` method that resets modifications. The `discard()` method of the active module is called when the discard action is triggered by the user.
-- Check/modify methods in the application called `newSegmentaion(), newModels()...`. These are called if a new file of the respective type exists and propagate the changes to later pipeline stages.
-
-## GUI Dev with Qt Designer
-
-This section is only relevant to modify the main UI of the application. The UI of the modules can be implemented directly.
-
-The `ui` folder is not visible to the application! Do not reference any resources within it directly. The UI and resources are compiled to python files which can be directly imported.
-
-For GUI development with the Qt Designer also install the pyqt5-tools
-
-```bash
-conda activate CarotidAnalyzer
-pip install pyqt5-tools
-```
-
-Run the Qt Designer with the CarotidAnalyzer environment active
-
-```bash
-designer
-```
-
-Modify UI `.ui` and Qt resource `.qrc` files. On Windows, compile them with
-
-```bash
-cd C:\Users\<username>\.conda\envs\CarotidAnalyzer\Scripts
-pyuic5.exe <your path>\carotidanalyzer\ui\mainwindow.ui -o <your path>\carotidanalyzer\mainwindow_ui.py
-pyrcc5.exe <your path>\carotidanalyzer\ui\resources.qrc -o <your path>\carotidanalyzer\resources_rc.py
-```
-
-On other platforms, just use the `pyuic5`/`pyrcc5` commands (no .exe) with the CarotidAnalyzer environment active.
+5. Inside the working directory, a folder named `flow_data` should contain the database models with hemodynamic simulations that are used in the FlowComp module.
