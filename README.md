@@ -14,6 +14,7 @@ The carotid bifurcation and flow model database is available at: [https://doi.or
 - `modules` All module widgets and associated classes are contained here.
   - `CenterlineModule.py` Module for generating centerlines.
   - `CropModule.py` Module for cropping CTA volumes.
+  - `FlowCompModule.py` Module for interactive flow analysis.
   - `Interactors.py` Image and 3D interactors shared across modules.
   - `Predictor.py` CNN for plaque/lumen label prediction.
   - `SegmentationModule.py` Module for segmenting cropped images.
@@ -75,4 +76,8 @@ The main application can now be run and modified.
 2. Any existing cases will be shown in the data inspector module. Double-click a case to load it or choose `Load Selected Patient`.
 3. To import new cases, use `File -> Load New DICOM` to create a new case subfolder and import a DICOM series (should be an axially resolved head/neck CTA). Choose the folder containing the series. Uncompressed  DICOM files are handled natively. Compressed files are handled by pydicom with numpy and GDCM, which enables import of most JPEG compression formats. See [this list](https://pydicom.github.io/pydicom/stable/old/image_data_handlers.html#guide-compressed) for a complete overview of supported formats.
 4. The pipeline can now be used on the new data. The application will ask if the full volume should be saved or only temporalily loaded. Saving full volumes may take 100-200 MB of disk space. If you do not intend to change the crop region later, saving can be omitted.
-5. Inside the working directory, a folder named `flow_data` should contain the database models with hemodynamic simulations that are used in the FlowComp module.
+5. Inside the working directory, a folder named `flow_data` should contain the database models with hemodynamic simulations that are used in the FlowComp module. The following files are accepted:
+  - `patient*_left_lumen_centerlines.vtp` / `patient*_right_lumen_centerlines.vtp`: Centerline geometries with radius information.
+  - `patient*_left_wss.vtu` / `patient*_right_wss.vtu`: WSS fields with wall geometry.
+  - `patient*_left_velocity_diastolic.vtp` / `patient*_left_velocity_diastolic.vtp` / `patient*_right_velocity_systolic.vtp` / `patient*_right_velocity_systolic.vtp`: Streamlines of diastolic/systolic velocity fields.
+  - `patient*_left_wss_map_images.npz` / `patient*_right_wss_map_images.npz`: Texture cache for vessel maps.
