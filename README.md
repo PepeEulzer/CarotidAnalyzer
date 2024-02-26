@@ -1,4 +1,4 @@
-# Carotid Analyzer -- FlowComp Extension
+# Carotid Analyzer $-$ FlowComp Extension
 
 Extension to the CarotidAnalyzer pipeline for blood flow analysis using morphological similarity.
 
