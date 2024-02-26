@@ -192,21 +192,20 @@ class CarotidAnalyzer(QMainWindow, Ui_MainWindow):
             # check if directory exists, if yes -> open new dialog and check again 
             if dir_name and ok:
                 while (os.path.exists(os.path.join(self.working_dir, dir_name)) or
-                       os.path.exists(os.path.join(self.working_dir,("patient_" + dir_name)))):
-                    dir_name, ok = QInputDialog.getText(self, "Set patient Directory", "Directory/Patient allready exists! Please choose another name:")
+                       os.path.exists(os.path.join(self.working_dir,("case_" + dir_name)))):
+                    dir_name, ok = QInputDialog.getText(self, "Set patient Directory", "Directory/Case allready exists! Please choose another name:")
                     # break if dialog canceled by user 
                     if not ok: 
                         break
 
                 if dir_name and ok: 
                     # check if name correct so that data can be found later
-                    if not dir_name.startswith('patient'):
-                        dir_name = "patient_" + dir_name
+                    if not dir_name.startswith('case'):
+                        dir_name = "case_" + dir_name
                     
                     # create directory 
                     path = os.path.join(self.working_dir, dir_name) 
                     os.mkdir(path)
-                    os.mkdir(os.path.join(path, "models"))
                     self.DICOM_source_dir = source_dir
                     self.DICOM_patient_ID = dir_name
                     
@@ -241,22 +240,14 @@ class CarotidAnalyzer(QMainWindow, Ui_MainWindow):
         self.patient_data = []
         self.tree_widget_data.clear()
 
-        for patient_folder in glob.glob(os.path.join(dir, "patient*")):
+        for patient_folder in glob.glob(os.path.join(dir, "case*")):
             pID = os.path.basename(patient_folder)
             patient_dict = {}
             patient_dict['patient_ID'] = pID
             patient_dict['base_path'] = patient_folder
 
-            # create a models subdir if it does not exist
-            model_path = os.path.join(patient_folder, "models")
-            if not os.path.exists(model_path):
-                os.makedirs(model_path)
-
-            def add_if_exists(dict_key, file_tail, models_subdir=False):
-                if models_subdir:
-                    path = os.path.join(patient_folder, "models", pID + file_tail)
-                else:
-                    path = os.path.join(patient_folder, pID + file_tail)
+            def add_if_exists(dict_key, file_tail):
+                path = os.path.join(patient_folder, pID + file_tail)
                 if os.path.exists(path):
                     patient_dict[dict_key] = path
                 else:
@@ -266,18 +257,17 @@ class CarotidAnalyzer(QMainWindow, Ui_MainWindow):
             # Non-existing filepaths are marked with 'False'.
             # First param is the dict key used to retrieve the entry.
             # Second param is the file tail after patientID.
-            # If the third param is true, the 'models' subdirectory is used.
             add_if_exists("volume_raw", ".nrrd")
             add_if_exists("volume_left", "_left.nrrd")
             add_if_exists("volume_right", "_right.nrrd")
             add_if_exists("seg_left", "_left.seg.nrrd")
             add_if_exists("seg_right", "_right.seg.nrrd")
-            add_if_exists("lumen_model_left", "_left_lumen.stl", True)
-            add_if_exists("lumen_model_right", "_right_lumen.stl", True)
-            add_if_exists("plaque_model_left", "_left_plaque.stl", True)
-            add_if_exists("plaque_model_right", "_right_plaque.stl", True)
-            add_if_exists("centerlines_left", "_left_lumen_centerlines.vtp", True)
-            add_if_exists("centerlines_right", "_right_lumen_centerlines.vtp", True)
+            add_if_exists("lumen_model_left", "_left_lumen.stl")
+            add_if_exists("lumen_model_right", "_right_lumen.stl")
+            add_if_exists("plaque_model_left", "_left_plaque.stl")
+            add_if_exists("plaque_model_right", "_right_plaque.stl")
+            add_if_exists("centerlines_left", "_left_lumen_centerlines.vtp")
+            add_if_exists("centerlines_right", "_right_lumen_centerlines.vtp")
             self.patient_data.append(patient_dict)
 
             entry_volume_raw = ["Full Volume", "", ""]
@@ -591,10 +581,10 @@ class CarotidAnalyzer(QMainWindow, Ui_MainWindow):
     def newModels(self):
         patient_ID = self.active_patient_dict['patient_ID']
         base_path  = self.active_patient_dict['base_path']
-        path_left_lumen = os.path.join(base_path, "models", patient_ID + "_left_lumen.stl")
-        path_left_plaque = os.path.join(base_path, "models", patient_ID + "_left_plaque.stl")
-        path_right_lumen = os.path.join(base_path, "models", patient_ID + "_right_lumen.stl")
-        path_right_plaque = os.path.join(base_path, "models", patient_ID + "_right_plaque.stl")
+        path_left_lumen = os.path.join(base_path, patient_ID + "_left_lumen.stl")
+        path_left_plaque = os.path.join(base_path, patient_ID + "_left_plaque.stl")
+        path_right_lumen = os.path.join(base_path, patient_ID + "_right_lumen.stl")
+        path_right_plaque = os.path.join(base_path, patient_ID + "_right_plaque.stl")
         lumen_item = self.active_patient_tree_widget_item.child(3)
         plaque_item = self.active_patient_tree_widget_item.child(4)
         if os.path.exists(path_left_lumen):
@@ -619,8 +609,8 @@ class CarotidAnalyzer(QMainWindow, Ui_MainWindow):
     def newCenterlines(self):
         patient_ID = self.active_patient_dict['patient_ID']
         base_path  = self.active_patient_dict['base_path']
-        path_left = os.path.join(base_path, "models", patient_ID + "_left_lumen_centerlines.vtp")
-        path_right = os.path.join(base_path, "models", patient_ID + "_right_lumen_centerlines.vtp")
+        path_left = os.path.join(base_path, patient_ID + "_left_lumen_centerlines.vtp")
+        path_right = os.path.join(base_path, patient_ID + "_right_lumen_centerlines.vtp")
         centerlines_item = self.active_patient_tree_widget_item.child(5)
         if os.path.exists(path_left):
             self.active_patient_dict['centerlines_left'] = path_left
@@ -630,8 +620,8 @@ class CarotidAnalyzer(QMainWindow, Ui_MainWindow):
             centerlines_item.setText(2, SYM_YES)
 
         # delete meta information files for stenoses if they exist
-        meta_path_left = os.path.join(base_path, "models", patient_ID + "_left_meta.txt")
-        meta_path_right = os.path.join(base_path, "models", patient_ID + "_right_meta.txt")
+        meta_path_left = os.path.join(base_path, patient_ID + "_left_meta.txt")
+        meta_path_right = os.path.join(base_path, patient_ID + "_right_meta.txt")
         if os.path.exists(meta_path_left):
             os.remove(meta_path_left)
         if os.path.exists(meta_path_right):

@@ -221,6 +221,8 @@ class Ui_MainWindow(object):
         self.action_load_new_DICOM.setShortcut(_translate("MainWindow", "Ctrl+N"))
         self.action_set_working_directory.setText(_translate("MainWindow", "Set Working Directory..."))
         self.action_set_working_directory.setShortcut(_translate("MainWindow", "Ctrl+O"))
+        self.action_delete_selected_patient.setText(_translate("MainWindow", "Delete selected Case"))
+        self.action_delete_selected_patient.setShortcut(_translate("MainWindow", "Ctrl+X"))  
         self.action_save_and_propagate.setText(_translate("MainWindow", "Save And Propagate"))
         self.action_save_and_propagate.setShortcut(_translate("MainWindow", "Ctrl+S"))
         self.action_crop_module.setText(_translate("MainWindow", "Crop Module"))

@@ -7,7 +7,7 @@ import nrrd
 import vtk
 from vtk.util.numpy_support import vtk_to_numpy, numpy_to_vtk
 from PyQt5.QtCore import Qt, pyqtSignal
-from PyQt5.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QSlider, QPushButton
+from PyQt5.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QSlider, QPushButton, QLabel
 
 from defaults import *
 from modules.Interactors import ImageSliceInteractor, VolumeRenderingInteractor
@@ -22,8 +22,13 @@ class CropModule(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.image = None
+        self.z_height = 124 # height of VOI in voxels
+        self.y_height = int(np.round(self.z_height * (72/124)))
+        self.x_height = int(np.round(self.z_height * (60/124)))
         self.crop_image_left = None
+        self.crop_image_left_center = None
         self.crop_image_right = None
+        self.crop_image_right_center = None
         
         self.box_left_source = vtk.vtkCubeSource()
         self.box_left_mapper = vtk.vtkPolyDataMapper()
@@ -76,6 +81,11 @@ class CropModule(QWidget):
         self.button_set_right.setStyleSheet("color:" + COLOR_RIGHT_HEX)
         self.button_set_right.setCheckable(True)
         self.button_set_right.setEnabled(False)
+        self.size_slider_label = QLabel("VOI Height: ")
+        self.size_slider = QSlider(Qt.Horizontal)
+        self.size_slider.setRange(50, 500)
+        self.size_slider.setSliderPosition(self.z_height)
+        self.size_slider_value = QLabel(str(self.z_height))
 
         self.cut_left_actor = self.__getCutActor(self.box_left_source.GetOutputPort(), COLOR_LEFT)
         self.cut_right_actor = self.__getCutActor(self.box_right_source.GetOutputPort(), COLOR_RIGHT)
@@ -83,8 +93,13 @@ class CropModule(QWidget):
         self.button_layout = QHBoxLayout()
         self.button_layout.addWidget(self.button_set_right)
         self.button_layout.addWidget(self.button_set_left)
+        self.slider_layout = QHBoxLayout()
+        self.slider_layout.addWidget(self.size_slider_label)
+        self.slider_layout.addWidget(self.size_slider)
+        self.slider_layout.addWidget(self.size_slider_value)
         self.slice_view_layout = QVBoxLayout()
         self.slice_view_layout.addLayout(self.button_layout)
+        self.slice_view_layout.addLayout(self.slider_layout)
         self.slice_view_layout.addWidget(self.slice_view)
         self.slice_view_layout.addWidget(self.slice_view_slider)
         self.top_layout = QHBoxLayout(self)
@@ -94,6 +109,7 @@ class CropModule(QWidget):
         # connect signals/slots
         self.slice_view.slice_changed[int].connect(self.sliceChanged)
         self.slice_view_slider.valueChanged[int].connect(self.slice_view.setSlice)
+        self.size_slider.valueChanged[int].connect(self.setCropSize)
         self.button_set_left.clicked[bool].connect(self.setLeftVolume)
         self.button_set_right.clicked[bool].connect(self.setRightVolume)
 
@@ -118,6 +134,23 @@ class CropModule(QWidget):
         actor.GetProperty().SetDiffuse(0.0)
         return actor
 
+
+    def setCropSize(self, z_height):
+        self.z_height = z_height # height of VOI in voxels
+        self.y_height = int(np.round(z_height * (72/124)))
+        self.x_height = int(np.round(z_height * (60/124)))
+
+        self.size_slider_value.setText(str(self.z_height))
+
+        if self.crop_image_left_center != None:
+            self.__setVolumeFinished(
+                self.box_left_source, self.box_left_actor, self.cut_left_actor, left=True, center=self.crop_image_left_center
+            )
+        if self.crop_image_right_center != None:
+            self.__setVolumeFinished(
+                self.box_right_source, self.box_right_actor, self.cut_right_actor, left=False, center=self.crop_image_right_center
+            )
+
     
     def sliceChanged(self, slice_nr):
         self.slice_view_slider.setSliderPosition(slice_nr)
@@ -133,10 +166,13 @@ class CropModule(QWidget):
         x,y,z = self.picker.GetPickPosition()
 
         # move selection box
-        xs, ys, zs = self.crop_volume_size
-        self.box_selection_source.SetBounds(x - xs, x + xs,
-                                            y - ys, y + ys,
-                                            z - zs, z + zs)
+        sx, sy, sz = self.image.GetSpacing()
+        x_size = self.x_height * 0.5 * sx
+        y_size = self.y_height * 0.5 * sy
+        z_size = self.z_height * 0.5 * sz
+        self.box_selection_source.SetBounds(x - x_size, x + x_size,
+                                            y - y_size, y + y_size,
+                                            z - z_size, z + z_size)
 
         # update scenes
         self.slice_view.GetRenderWindow().Render()
@@ -174,42 +210,49 @@ class CropModule(QWidget):
             self.__disableHoverVolume()
 
     
-    def __setVolumeFinished(self, box_source, box_actor, cut_actor, left=True):
-        # pick current mouse position, screen coordinates
-        x_view, y_view = self.slice_view.GetEventPosition()  
+    def __setVolumeFinished(self, box_source, box_actor, cut_actor, left=True, center=None):
+        if center == None:
+            # pick current mouse position, screen coordinates
+            x_view, y_view = self.slice_view.GetEventPosition()  
 
-        # world coordinates 
-        self.picker.Pick(x_view, y_view, self.slice_view.slice, self.slice_view.renderer) 
-        pos = self.picker.GetPickPosition()
+            # world coordinates 
+            self.picker.Pick(x_view, y_view, self.slice_view.slice, self.slice_view.renderer) 
+            pos = self.picker.GetPickPosition()
 
-        # discrete image coordinates
-        origin = self.image.GetOrigin()
-        spacing = self.image.GetSpacing()
-        x,y,z = (int(round((pos[0] - origin[0]) / spacing[0])), 
-                 int(round((pos[1] - origin[1]) / spacing[1])), 
-                 int(self.slice_view.slice))
+            # discrete image coordinates
+            origin = self.image.GetOrigin()
+            spacing = self.image.GetSpacing()
+            x,y,z = (int(round((pos[0] - origin[0]) / spacing[0])), 
+                     int(round((pos[1] - origin[1]) / spacing[1])), 
+                     int(self.slice_view.slice))
+        else:
+            spacing = self.image.GetSpacing()
+            x, y, z = center
 
-        # crop volume around center +- 30, 36, 62
+        # crop volume
         extractor = vtk.vtkExtractVOI()
         extractor.SetInputData(self.image)
-        extractor.SetVOI(x-29, x+30, y-35, y+36, z-61, z+62)
+        extractor.SetVOI(
+            x-int(self.x_height/2), x+int(self.x_height/2), 
+            y-int(self.y_height/2), y+int(self.y_height/2),
+            z-int(self.z_height/2), z+int(self.z_height/2))
         
         # scale resolution * 2
         reslicer = vtk.vtkImageReslice()
         reslicer.SetInputConnection(extractor.GetOutputPort())
         reslicer.SetInterpolationModeToCubic()
         reslicer.SetOutputExtent(0, 119, 0, 143, 0, 247)
-        reslicer.SetOutputSpacing([s*0.5 for s in spacing])
+        reslicer.SetOutputSpacing([s*(self.z_height/248) for s in spacing])
         reslicer.Update()
         crop_image = reslicer.GetOutput()
 
         # adapt crop display
         ox, oy, oz = crop_image.GetOrigin()
         sx, sy, sz = crop_image.GetSpacing()
-        x, y, z = crop_image.GetDimensions()
-        box_source.SetBounds(ox, ox + sx*x,
-                             oy, oy + sy*y,
-                             oz, oz + sz*z)
+        x_dim, y_dim, z_dim = crop_image.GetDimensions()
+        box_source.SetBounds(ox, ox + sx*x_dim,
+                             oy, oy + sy*y_dim,
+                             oz, oz + sz*z_dim)
         self.volume_view.renderer.AddActor(box_actor)
         self.volume_view.renderer.AddActor(cut_actor)
         self.slice_view.renderer.AddActor(cut_actor)
@@ -225,8 +268,10 @@ class CropModule(QWidget):
         # emit data modified
         if left:
             self.crop_image_left = crop_image
+            self.crop_image_left_center = (x, y, z)
         else:
             self.crop_image_right = crop_image
+            self.crop_image_right_center = (x, y, z)
         self.data_modified.emit()
 
 
@@ -317,8 +362,8 @@ class CropModule(QWidget):
 
         # compute crop volume size around a center
         # needs to be 1/4 of target dimension (120 144 248)
-        sx, sy, sz = self.image.GetSpacing()
-        self.crop_volume_size = (30*sx, 36*sy, 62*sz)
+        # sx, sy, sz = self.image.GetSpacing()
+        # self.crop_volume_size = (30*sx, 36*sy, 62*sz)
 
         # set the volume image in both views
         self.volume_view.setImage(self.image)
@@ -379,7 +424,9 @@ class CropModule(QWidget):
     
     def discard(self):
         self.crop_image_left = None
+        self.crop_image_left_center = None
         self.crop_image_right = None
+        self.crop_image_right_center = None
         self.__loadCropVolumeBox(self.patient_dict['volume_left'], self.box_left_source, self.box_left_actor, self.cut_left_actor)
         self.__loadCropVolumeBox(self.patient_dict['volume_right'], self.box_right_source, self.box_right_actor, self.cut_right_actor)
         self.slice_view.GetRenderWindow().Render()

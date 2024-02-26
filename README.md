@@ -4,6 +4,15 @@ A full pipeline for cropping, model extraction, centerline computation, and inte
 
 ![Pipeline Overview](./img/carotid_pipeline.png)
 
+This repository belongs to the following publication:
+
+P. Eulzer,  F. von Deylen,  W.-C. Hsu,  R. Wickenhöfer,  C. M. Klingner,  and K. Lawonn (2023), A Fully Integrated Pipeline for Visual Carotid Morphology Analysis. Computer Graphics Forum, 42(3): 25-37. [https://doi.org/10.1111/cgf.14808](https://doi.org/10.1111/cgf.14808)
+
+## Database
+The carotid bifurcation model database is available at: [https://doi.org/10.5281/zenodo.7634643](https://doi.org/10.5281/zenodo.7634643). After download, it can be used as a target folder for the application.
+
+> Note that the database contains only the reconstructed models and centerlines. The CTA scans are not public to preserve patient privacy.
+
 ## Files
 
 - `modules` All module widgets and associated classes are contained here.
@@ -21,7 +30,6 @@ A full pipeline for cropping, model extraction, centerline computation, and inte
 - `CarotidAnalyzer.py` Main application, run this for execution.
 - `defaults.py` Global constants (colors, symbols...)
 - `mainwindow_ui.py` Compiled UI file.
-- `models.zip` The carotid bifurcation model database. Can be used as a target folder for the application.
 - `resources_rc.py` Compiled resource file.
 - `seg_model_weights.pth` CNN weights trained for carotid bifurcation lumen and plaque labelling.
 
@@ -52,6 +60,7 @@ conda create -n CarotidAnalyzer python=3.10 pytorch torchvision torchaudio pytor
 > ```bash
 > conda create -n CarotidAnalyzer python=3.10 pytorch torchvision torchaudio cpuonly -c pytorch
 > ```
+> See also the [PyTorch](https://pytorch.org/get-started/locally/) installation instructions.
 
 Then, install the other packages:
 
